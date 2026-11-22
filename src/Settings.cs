@@ -70,6 +70,9 @@ namespace HallowTorrents
         [DataMember] public bool ScheduleOn;
         [DataMember] public List<ScheduleRule> Schedule;
         [DataMember] public string BlocklistFile;      // eMule .dat / PeerGuardian .p2p text
+        [DataMember] public string BlocklistUrl;       // v1.1: a list downloaded over the VPN (plain, .gz or .zip)
+        [DataMember] public int BlocklistDays = 7;     // ...and refreshed this often
+        [DataMember] public string BlocklistUpdated, BlocklistNote;   // when it was last downloaded / what happened
 
         // ---- network
         [DataMember] public int Port;                  // 0 = picked on first start
@@ -90,7 +93,7 @@ namespace HallowTorrents
         // ---- safety
         [DataMember] public bool ScanDone = true;            // Defender scan when a download completes
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; }
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; }
 
         public static TorSettings Load()
         {
@@ -123,6 +126,7 @@ namespace HallowTorrents
             if (VpnSource != "adapter") VpnSource = "hallow";
             if (GameMode != "off" && GameMode != "limit") GameMode = "pause";
             if (GameKBps < 1) GameKBps = 1;
+            if (BlocklistDays < 1) BlocklistDays = 1; if (BlocklistDays > 90) BlocklistDays = 90;
             if (Port < 1024 || Port > 65535) Port = new Random().Next(20000, 60000);
         }
         public Category Cat(string name)

@@ -12,7 +12,7 @@ using MonoTorrent;
 
 namespace HallowTorrents
 {
-    public static class Dialogs
+    public static partial class Dialogs
     {
         public static Window Make(string title, double width)
         {
@@ -50,7 +50,8 @@ namespace HallowTorrents
         public static void Info(Window owner, string title, string text) { var w = InfoWindow(title, text); Own(w, owner); w.ShowDialog(); }
 
         // ---- Add: what's in it (tick the files you want), where it goes, its category. done(entry or null)
-        public static Window AddWindow(Controller c, string item, Action<Entry> done)
+        public static Window AddWindow(Controller c, string item, Action<Entry> done) { return AddWindow(c, item, null, done); }
+        public static Window AddWindow(Controller c, string item, string category, Action<Entry> done)
         {
             bool magnet = item.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
             var w = Make("Add torrent - Hallow Torrents", 640); var sp = Body(w);
@@ -89,7 +90,7 @@ namespace HallowTorrents
                 var allRow = Ui.Row(Ui.Btn("All", () => boxes.ForEach(b => b.IsChecked = true)), Ui.Btn("None", () => boxes.ForEach(b => b.IsChecked = false))); allRow.Margin = new Thickness(0, 6, 0, 0); sp.Children.Add(allRow);
             }
             // category -> folder
-            string cat = Media.Detect(name, files);
+            string cat = category ?? Media.Detect(name, files);
             sp.Children.Add(Ui.Caps("Category", 10.5)); ((FrameworkElement)sp.Children[sp.Children.Count - 1]).Margin = new Thickness(0, 12, 0, 4);
             var folder = Ui.Field(FolderFor(c, cat));
             var chips = new WrapPanel();

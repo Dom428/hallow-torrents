@@ -24,14 +24,14 @@ using WF = System.Windows.Forms;
 [assembly: AssemblyTitle("Hallow Torrents")]
 [assembly: AssemblyProduct("Hallow Torrents")]
 [assembly: AssemblyDescription("A game-aware torrent client that only runs over your VPN")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace HallowTorrents
 {
     public static class Program
     {
-        public const string Version = "1.0";
+        public const string Version = "1.1";
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
 
         [STAThread]
@@ -150,6 +150,9 @@ namespace HallowTorrents
         FileSystemWatcher accentWatch; DispatcherTimer modePoll;
         public IReg Reg = TorSettings.TestDir != null ? (IReg)new FakeReg() : new RealReg();
         public List<TorrentView> SnapViews;   // --snap: made-up torrents
+        public Rss Rss;                       // v1.1: RSS auto-download (over the VPN only)
+        public Stats SnapStats; public int SnapRanges;   // --snap: made-up statistics
+        public Stats StatsNow { get { return SnapMode ? SnapStats : Core.Stats; } }
 
         public Controller(bool trayOnly, bool snapMode = false)
         {
@@ -157,6 +160,9 @@ namespace HallowTorrents
             if (snapMode) return;
             S.Save();
             Core = new Core(TorSettings.Dir, () => S); Core.Log += Log; Core.Completed += x => Task.Run(() => Finished(x));
+            Rss = new Rss(Core, TorSettings.Dir); Rss.Log += Log; Rss.Notify += (t, m) => ui.BeginInvoke(new Action(() => { Notify(t, m); var h = Ticked; if (h != null) h(); }));
+            var rt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) }; rt.Tick += (s, e) => KickRss(); rt.Start();
+            var bt = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) }; bt.Tick += (s, e) => CheckBlocklist(); bt.Start();
             INetworks nets = TorSettings.Fake ? (INetworks)new FakeNetworks(Path.Combine(TorSettings.Dir, "fake-adapters.txt")) : new RealNetworks();
             Watch = new VpnWatch(() => S, nets, !TorSettings.Fake);
             Watch.Changed += (o, n) => VpnChanged(n);
@@ -196,6 +202,7 @@ namespace HallowTorrents
             ui.BeginInvoke(new Action(() =>
             {
                 if (was.Ok && !n.Ok && Core.Entries.Any(x => !x.UserPaused)) Notify("Torrents stopped: the VPN dropped", "Everything is stopped until your VPN is back. Nothing went out over your normal connection.");
+                if (n.Ok && Core.EngineUp) { KickRss(); CheckBlocklist(); }
                 WriteStatus(); var h = Ticked; if (h != null) h();
             }));
         }
@@ -274,18 +281,59 @@ namespace HallowTorrents
             Task.Run(() => { x.Scan = "scanning"; var r = DefenderScan.Run(Core.RootOf(id)); x.Scan = r[0]; x.ScanText = r[1]; Core.Save(); ui.BeginInvoke(new Action(() => { Say(r[1]); var h = Ticked; if (h != null) h(); })); });
         }
 
+        // ---------------- v1.1: RSS (only while the VPN is up) and the blocklist from a URL (downloaded over the VPN every N days)
+        public void KickRss() { if (SnapMode || quitting || Rss == null || !Core.EngineUp || Rss.Busy) return; Task.Run(async () => { try { await Rss.Tick(DateTime.Now).ConfigureAwait(false); } catch (Exception e) { Log("rss: " + e.Message); } ui.BeginInvoke(new Action(() => { var h = Ticked; if (h != null) h(); })); }); }
+        bool blocklistBusy;
+        public void CheckBlocklist()
+        {
+            if (SnapMode || string.IsNullOrWhiteSpace(S.BlocklistUrl) || !Core.EngineUp) return;
+            DateTime last; if (DateTime.TryParse(S.BlocklistUpdated, out last) && (DateTime.Now - last).TotalDays < S.BlocklistDays && File.Exists(Core.BlocklistUrlFile)) return;
+            UpdateBlocklist(null);
+        }
+        public void UpdateBlocklist(Action<string> done)
+        {
+            if (SnapMode) { if (done != null) done("Updated."); return; }
+            if (string.IsNullOrWhiteSpace(S.BlocklistUrl)) { Core.ReloadBlocklist(); if (done != null) done("No blocklist address set."); return; }
+            if (!Core.EngineUp) { if (done != null) done("The blocklist is downloaded over the VPN only - connect it first."); return; }
+            if (blocklistBusy) return; blocklistBusy = true;
+            var url = S.BlocklistUrl;
+            Task.Run(() =>
+            {
+                int n; var err = Blocklist.Update(url, Core.BoundIp, Core.BoundDns, Core.BlocklistUrlFile, out n);
+                ui.BeginInvoke(new Action(() =>
+                {
+                    blocklistBusy = false;
+                    if (err == null) { S.BlocklistUpdated = DateTime.Now.ToString("o"); S.BlocklistNote = "Downloaded " + n.ToString("N0") + " ranges over the VPN."; }
+                    else S.BlocklistNote = "Couldn't update it: " + err;
+                    S.Save(); Core.ReloadBlocklist(); Log("blocklist url: " + (err ?? n + " ranges"));
+                    if (done != null) done(S.BlocklistNote);
+                    var h = Ticked; if (h != null) h();
+                }));
+            });
+        }
+
         // ---------------- adding
-        // from outside (double-click, the browser, the pipe): the Add window when it can be shown, otherwise straight in
-        public string AddFromOutside(string item)
+        // from outside (double-click, the browser, the pipe): the Add window when it can be shown, otherwise straight in.
+        // category (v1.1, "add <magnet> --category <c>"): one of your categories - its folder is used, and the Add window has it picked.
+        public string AddFromOutside(string item, string category = null)
         {
             item = (item ?? "").Trim().Trim('"');
             bool magnet = item.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
             if (!magnet && !(item.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && File.Exists(item))) return "error only magnet links and .torrent files can be added";
-            if (S.AskOnAdd && !TorSettings.Headless && !SnapMode) { ShowMain(null); if (main != null) main.AskAdd(item); return "ok " + Family.Json(new Dictionary<string, object> { { "asking", true } }); }
-            string err; var x = magnet ? Core.AddMagnet(item, null, null, true, out err) : Core.AddTorrentFile(item, null, null, null, true, out err);
+            if (category != null) { var cat = S.Cat(category.Trim()); if (cat == null) return "error no category called " + category.Trim() + " (" + string.Join(", ", S.Categories.Select(c => c.Name)) + ")"; category = cat.Name; }
+            if (S.AskOnAdd && !TorSettings.Headless && !SnapMode) { ShowMain(null); if (main != null) main.AskAdd(item, category); return "ok " + Family.Json(new Dictionary<string, object> { { "asking", true }, { "category", category } }); }
+            string err; var x = magnet ? Core.AddMagnet(item, null, category, true, out err) : Core.AddTorrentFile(item, null, category, null, true, out err);
             if (x == null) return "error " + err;
             Notify("Torrent added", x.Name + (Locked ? " - it starts when your VPN is connected." : ""));
-            return "ok " + Family.Json(new Dictionary<string, object> { { "id", x.Id }, { "asking", false } });
+            return "ok " + Family.Json(new Dictionary<string, object> { { "id", x.Id }, { "asking", false }, { "category", x.Category } });
+        }
+        // "add <magnet or path> [--category <name>]" -> (item, category or null)
+        public static string[] SplitAdd(string arg)
+        {
+            var i = arg.LastIndexOf(" --category ", StringComparison.OrdinalIgnoreCase);
+            if (i < 0) return new[] { arg.Trim(), null };
+            var cat = arg.Substring(i + 12).Trim().Trim('"');
+            return new[] { arg.Substring(0, i).Trim(), cat.Length == 0 ? null : cat };
         }
 
         // ---------------- window
@@ -463,6 +511,9 @@ namespace HallowTorrents
             d["game"] = Game; d["gameMode"] = S.GameMode; d["held"] = Core.Hold;
             d["limitDownKBps"] = Core.LimitDown; d["limitUpKBps"] = Core.LimitUp;
             d["lastCrash"] = Crash.LastTime() == null ? null : Family.Time(Crash.LastTime().Value);
+            // v1.1 (counts only)
+            d["rssFeeds"] = Rss == null ? 0 : Rss.Data.Feeds.Count; d["rssRules"] = Rss == null ? 0 : Rss.Data.Rules.Count(r => r.Enabled);
+            d["blocklistRanges"] = Core.BlocklistRanges;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -474,7 +525,7 @@ namespace HallowTorrents
             {
                 case "ping": return "ok " + Family.Json(new Dictionary<string, object> { { "app", "Torrents" }, { "version", Program.Version } });
                 case "status": { var d = StatusData(true); Family.WriteStatus(Family.Json(d)); return "ok " + Family.Json(d); }
-                case "add": if (arg.Length == 0) return "error add <magnet link or .torrent path>"; return OnUi(() => AddFromOutside(arg));
+                case "add": { if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1])); }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
                 case "open": return OnUi(() => { var p = arg.Length > 0 ? MainWindow.PageId(arg) : null; if (arg.Length > 0 && p == null) return "error no page called " + arg; ShowMain(p); return "ok"; });
@@ -519,7 +570,7 @@ namespace HallowTorrents
         {
             switch (cmd)
             {
-                case "test-list": return "ok " + Family.Json(Core.Snapshot(false).Select(v => v.Name + "|" + v.State).ToList());
+                case "test-list": return "ok " + Family.Json(Core.Snapshot(false).Select(v => v.Name + "|" + v.State + "|" + v.Category).ToList());
                 case "test-vpn": return "ok " + Family.Json(new Dictionary<string, object> { { "ok", Vpn.Ok }, { "ip", Vpn.Ip == null ? null : Vpn.Ip.ToString() }, { "engine", Core.EngineUp }, { "message", Vpn.Message } });
                 case "test-handler": SetHandler(arg == "on"); return "ok " + HandlerOn;
                 case "test-autostart": SetStartWithWindows(arg == "on"); return "ok " + StartsWithWindows();

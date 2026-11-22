@@ -45,6 +45,12 @@ namespace HallowTorrents.Tests
                 Ok(Cmd(exe, dir, "add https://example.com/x.torrent").StartsWith("error only magnet links and .torrent files"), "a web address is refused (nothing downloaded)");
                 Ok(Cmd(exe, dir, "add C:\\nope\\missing.torrent").StartsWith("error"), "a missing .torrent path: error");
                 r = Cmd(exe, dir, "test-list"); Ok(r.Contains("Test Magnet|Waiting for VPN"), "it waits for the VPN: " + r);
+                // v1.1: the browser hand-off with a category
+                var magnet2 = "magnet:?xt=urn:btih:2123456789abcdef0123456789abcdef01234567&dn=Cat+Magnet&tr=http%3A%2F%2F127.0.0.1%3A9%2Fannounce";
+                r = Cmd(exe, dir, "add " + magnet2 + " --category tv"); Ok(r.StartsWith("ok {\"id\":\"2123456789abcdef0123456789abcdef01234567\"") && r.Contains("\"category\":\"TV\""), "pipe add <magnet> --category tv: " + r);
+                Ok(Cmd(exe, dir, "test-list").Contains("Cat Magnet|Waiting for VPN|TV"), "...it's in the TV category");
+                r = Cmd(exe, dir, "add magnet:?xt=urn:btih:3123456789abcdef0123456789abcdef01234567 --category Nope"); Ok(r.StartsWith("error no category called Nope"), "an unknown category is refused: " + r);
+                Ok(Cmd(exe, dir, "add magnet:?xt=urn:btih:3123456789abcdef0123456789abcdef01234567 --category").StartsWith("error"), "--category without a name: error");
                 WriteVpn(dir, true);
                 bool up = false; for (int i = 0; i < 20 && !up; i++) { Thread.Sleep(150); up = Cmd(exe, dir, "test-vpn").Contains("\"engine\":true"); }
                 r = Cmd(exe, dir, "test-vpn"); Ok(up && r.Contains("\"ip\":\"127.0.0.5\""), "Hallow VPN connected: engine bound to the VPN adapter, never Ethernet: " + r);

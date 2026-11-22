@@ -23,7 +23,9 @@ namespace HallowTorrents
             { "Send to library", "share-from-square" }, { "Connect Hallow VPN", "lock" }, { "VPN settings", "gear" }, { "Browse...", "folder-open" }, { "Set", "check" }, { "Save", "check" }, { "OK", "check" },
             { "Cancel", "xmark" }, { "Add", "plus" }, { "Yes, use Hallow Torrents", "check" }, { "Not now", "xmark" }, { "Got it", "check" }, { "Check for updates", "arrows-rotate" }, { "Open data folder", "folder-open" },
             { "Check my torrent IP", "magnifying-glass" }, { "Add rule", "plus" }, { "Delete", "trash-can" }, { "Show details", "eye" }, { "Update", "download" }, { "Refresh", "arrows-rotate" }, { "Clear", "xmark" },
-            { "Remove and delete files", "trash-can" }, { "Add and start", "play" }, { "Add paused", "pause" }
+            { "Remove and delete files", "trash-can" }, { "Add and start", "play" }, { "Add paused", "pause" },
+            { "Create torrent", "file-circle-plus" }, { "Create", "file-circle-plus" }, { "Add feed", "rss" }, { "Add tracker", "plus" }, { "Move storage...", "truck-moving" }, { "Rename", "pen" },
+            { "Rename folder...", "folder-tree" }, { "Edit", "pen" }, { "Folder...", "folder-open" }, { "File...", "file-arrow-down" }, { "Update now", "arrows-rotate" }
         };
         static readonly string[][] Prefixes = { new[] { "Update to", "download" } };
         public static string ForLabel(string label)

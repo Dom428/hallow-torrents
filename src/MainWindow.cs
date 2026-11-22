@@ -21,7 +21,7 @@ namespace HallowTorrents
         readonly Dictionary<string, Button> nav = new Dictionary<string, Button>();
         Border content; TextBlock sayText, meter; Button updateBtn; DispatcherTimer sayTimer;
         public bool Exiting;
-        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "settings", "Settings", "gear" } };
+        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "settings", "Settings", "gear" } };
         public static string PageId(string s)
         {
             var v = (s ?? "").Trim().ToLowerInvariant(); if (v == "list" || v == "torrents") v = "transfers";
@@ -97,20 +97,22 @@ namespace HallowTorrents
         {
             page = PageId(id) ?? "transfers";
             foreach (var kv in nav) kv.Value.Tag = kv.Key == page ? "on" : null;
-            listPanel = null;
-            content.Child = page == "settings" ? SettingsPage() : TransfersPage();
+            listPanel = null; statsBox = null; rssBox = null;
+            content.Child = page == "settings" ? SettingsPage() : page == "rss" ? RssPage() : page == "stats" ? StatsPage() : TransfersPage();
             Refresh();
         }
         public void Refresh()
         {
             if (meter != null) meter.Text = (c.Locked ? "VPN LOCK · stopped" : "VPN · " + (c.SnapMode ? "10.5.0.2" : c.Vpn.Ip + "")) + "   ↓ " + Fmt.Rate(c.DownRate) + "   ↑ " + Fmt.Rate(c.UpRate);
             if (page == "transfers" && listPanel != null) RefreshTransfers();
+            else if (page == "stats" && statsBox != null) RefreshStats();
+            else if (page == "rss" && rssBox != null) RefreshRss();
         }
 
         // ---------------- adding
-        public void AskAdd(string item)
+        public void AskAdd(string item, string category = null)
         {
-            var w = Dialogs.AddWindow(c, item, x => { if (x != null) { selected = x.Id; Say("Added " + x.Name + (c.Locked ? " - it starts once your VPN is connected." : ".")); Refresh(); } });
+            var w = Dialogs.AddWindow(c, item, category, x => { if (x != null) { selected = x.Id; Say("Added " + x.Name + (c.Locked ? " - it starts once your VPN is connected." : ".")); Refresh(); } });
             Dialogs.Own(w, this); w.Show();
         }
         public void AskMagnet() { var w = Dialogs.MagnetWindow(m => { if (m != null) AskAdd(m); }); Dialogs.Own(w, this); w.Show(); }
@@ -133,7 +135,7 @@ namespace HallowTorrents
             rows.Clear(); bannerKey = null;
             var dp = new DockPanel { Margin = new Thickness(20, 16, 20, 12) };
             var top = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-            var acts = Ui.Row(Ui.Btn("Add torrent file", AskFile, true), Ui.Btn("Add magnet link", AskMagnet), Ui.Btn("Pause all", () => { if (!c.SnapMode) c.Core.PauseAll(); Refresh(); }), Ui.Btn("Resume all", () => { if (!c.SnapMode) c.Core.ResumeAll(); Refresh(); }));
+            var acts = Ui.Row(Ui.Btn("Add torrent file", AskFile, true), Ui.Btn("Add magnet link", AskMagnet), Ui.Btn("Create torrent", AskCreate), Ui.Btn("Pause all", () => { if (!c.SnapMode) c.Core.PauseAll(); Refresh(); }), Ui.Btn("Resume all", () => { if (!c.SnapMode) c.Core.ResumeAll(); Refresh(); }));
             top.Children.Add(acts);
             DockPanel.SetDock(top, Dock.Top); dp.Children.Add(top);
             bannerPanel = new StackPanel(); DockPanel.SetDock(bannerPanel, Dock.Top); dp.Children.Add(bannerPanel);
@@ -265,7 +267,7 @@ namespace HallowTorrents
             var dp = new DockPanel();
             var top = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
             var tabs = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(tabs, Dock.Right);
-            foreach (var t in new[] { new[] { "general", "General" }, new[] { "files", "Files" }, new[] { "safety", "Safety & library" } })
+            foreach (var t in new[] { new[] { "general", "General" }, new[] { "files", "Files" }, new[] { "trackers", "Trackers" }, new[] { "safety", "Safety & library" } })
             {
                 var id = t[0]; var tb = new ToggleButton { Content = t[1], Style = Ui.S("Chip"), IsChecked = detailTab == id, Margin = new Thickness(6, 0, 0, 0) };
                 tb.Click += (s, e) => { detailTab = id; BuildDetails(); }; tabs.Children.Add(tb);
@@ -273,7 +275,7 @@ namespace HallowTorrents
             top.Children.Add(tabs);
             var title = Ui.T(v.Name, 14, true); title.TextWrapping = TextWrapping.NoWrap; title.TextTrimming = TextTrimming.CharacterEllipsis; top.Children.Add(title);
             DockPanel.SetDock(top, Dock.Top); dp.Children.Add(top);
-            FrameworkElement body = detailTab == "files" ? FilesTab(v) : detailTab == "safety" ? SafetyTab(v) : GeneralTab(v);
+            FrameworkElement body = detailTab == "files" ? FilesTab(v) : detailTab == "trackers" ? TrackersTab(v) : detailTab == "safety" ? SafetyTab(v) : GeneralTab(v);
             dp.Children.Add(body);
             details.Child = dp;
         }
@@ -312,6 +314,7 @@ namespace HallowTorrents
             acts.Children.Add(Ui.Btn("Move down", () => { if (!c.SnapMode) c.Core.Move(v.Id, 1); Refresh(); }));
             acts.Children.Add(Ui.Btn("Speed limits...", () => { var w = Dialogs.LimitsWindow(v.Name, v.DownKBps, v.UpKBps, a => { if (a != null) Do(() => c.Core.SetLimits(v.Id, a[0], a[1])); }); Dialogs.Own(w, this); w.ShowDialog(); }));
             acts.Children.Add(Ui.Btn("Force recheck", () => { if (c.SnapMode) return; c.Core.Recheck(v.Id).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => Say(t.Result ?? "Checking its files...")))); }));
+            acts.Children.Add(Ui.Btn("Move storage...", () => AskMoveStorage(v)));
             acts.Children.Add(Ui.Btn("Open folder", () => c.OpenFolder(c.SnapMode ? null : c.Core.RootOf(v.Id) ?? v.SavePath)));
             acts.Children.Add(Ui.Danger("Remove", () => { var w = Dialogs.RemoveWindow(v.Name, del => { if (del == null || c.SnapMode) return; c.Core.Remove(v.Id, del.Value).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() => { selected = null; Say(t.Result ?? "Removed " + v.Name + "."); RefreshTransfers(); BuildDetails(); }))); }); Dialogs.Own(w, this); w.ShowDialog(); }));
             sp.Children.Add(acts);
@@ -323,20 +326,28 @@ namespace HallowTorrents
             var sp = new StackPanel();
             if (v.Files.Count == 0) { sp.Children.Add(Ui.Muted(c.Locked ? "The file list arrives once it starts - it needs your VPN connected." : "Getting its file list from peers...", 12.5)); return sp; }
             var names = new[] { "Skip", "Low", "Normal", "High" };
+            // v1.1: rename a folder; one priority for every file
+            var head = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+            if (v.Files.Any(f => (f.Rel ?? f.Path).Contains("\\"))) head.Children.Add(Small("Rename folder...", () => AskRenameFolder(v)));
+            var allLabel = Ui.Muted("All files:", 11.5); allLabel.VerticalAlignment = VerticalAlignment.Center; allLabel.Margin = new Thickness(4, 0, 4, 0); head.Children.Add(allLabel);
+            for (int p = 0; p < 4; p++) { var pp = p; head.Children.Add(Small(names[p], () => Do(async () => { foreach (var f in v.Files) await c.Core.SetFilePrio(v.Id, f.Index, pp); }))); }
+            sp.Children.Add(head);
             foreach (var f in v.Files)
             {
                 var row = new DockPanel { Margin = new Thickness(0, 1, 0, 1) };
                 var pr = new StackPanel { Orientation = Orientation.Horizontal }; DockPanel.SetDock(pr, Dock.Right);
+                var ff = f; var ren = Small("Rename", () => AskRenameFile(v, ff)); ren.Margin = new Thickness(6, 0, 0, 0);
                 for (int p = 0; p < 4; p++)
                 {
                     var pp = p; var fi = f.Index; var t = new ToggleButton { Content = names[p], Style = Ui.S("Chip"), IsChecked = f.Prio == p, Margin = new Thickness(3, 0, 0, 0), Padding = new Thickness(7, 1, 7, 1), FontSize = 11 };
                     t.Click += (s, e) => Do(() => c.Core.SetFilePrio(v.Id, fi, pp)); pr.Children.Add(t);
                 }
+                pr.Children.Add(ren);
                 row.Children.Add(pr);
                 var pct = Ui.Num(f.Progress.ToString("0") + "%", 11.5, Ui.R("Muted")); pct.Width = 46; DockPanel.SetDock(pct, Dock.Right); row.Children.Add(pct);
                 var sz = Ui.Num(Fmt.Bytes(f.Length), 11.5, Ui.R("Muted")); sz.Width = 74; DockPanel.SetDock(sz, Dock.Right); row.Children.Add(sz);
                 var flagged = v.Flags.Any(x => x.StartsWith(f.Path + "|"));
-                var nm = new TextBlock { Text = f.Path, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Foreground = f.Prio == 0 ? Ui.R("Faint") : flagged ? Ui.R("Amber") : Ui.R("Text") };
+                var nm = new TextBlock { Text = f.Rel ?? f.Path, ToolTip = f.Rel != null && f.Rel != f.Path ? "In the torrent: " + f.Path : null, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Foreground = f.Prio == 0 ? Ui.R("Faint") : flagged ? Ui.R("Amber") : Ui.R("Text") };
                 row.Children.Add(nm); sp.Children.Add(row);
             }
             return new ScrollViewer { Content = sp, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };

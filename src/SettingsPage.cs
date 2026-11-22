@@ -152,8 +152,31 @@ namespace HallowTorrents
             n.Children.Add(Ui.Switch("Local peer discovery (talks to your home network only, outside the VPN - off unless you need it)", S.Lpd, on => { S.Lpd = on; SavedRestart(); }));
             n.Children.Add(Ui.T("Encryption", 12.5, true));
             n.Children.Add(Choice(new[] { new[] { "prefer", "Prefer encrypted connections" }, new[] { "require", "Require encryption (fewer peers)" } }, S.Encryption, id => { S.Encryption = id; SavedRestart(); }));
-            n.Children.Add(Dialogs.Labeled("IP blocklist", FolderField(S.BlocklistFile, p => { S.BlocklistFile = p; SavedRestart(); }, true, "Blocklists (*.dat;*.p2p;*.txt)|*.dat;*.p2p;*.txt|All files|*.*")));
-            n.Children.Add(Ui.Muted("eMule (ipfilter.dat) or PeerGuardian (.p2p) text format, from a file you saved." + (c.SnapMode || c.Core.BlocklistRanges == 0 ? "" : " Loaded: " + c.Core.BlocklistRanges + " ranges, " + c.Core.Blocked + " peers blocked."), 12, 0));
+            // ---- the IP blocklist (v1.1: also from a URL, downloaded over the VPN and refreshed every N days)
+            var bl = Section(page, "IP blocklist", "Peers in these address ranges are refused. PeerGuardian / P2P or eMule ipfilter.dat format - plain, .gz or .zip. A list from an address is downloaded over the VPN only.");
+            TextBlock blNote = null;
+            Action blShow = () =>
+            {
+                if (blNote == null) return;
+                var ranges = c.SnapMode ? c.SnapRanges : c.Core.BlocklistRanges; var blocked = c.SnapMode ? 1284 : c.StatsNow.Blocked;
+                DateTime up; var when = DateTime.TryParse(S.BlocklistUpdated, out up) ? " Last downloaded " + up.ToString("d MMM, HH:mm") + "." : "";
+                blNote.Text = (ranges > 0 ? "Loaded: " + ranges.ToString("N0") + " ranges \u00B7 " + blocked.ToString("N0") + " peers blocked so far." : "No blocklist loaded.") + when + (string.IsNullOrEmpty(S.BlocklistNote) ? "" : " " + S.BlocklistNote) + (c.SnapMode || c.Core.BlocklistError == null ? "" : " Problem: " + c.Core.BlocklistError);
+            };
+            bl.Children.Add(Dialogs.Labeled("From a file", FolderField(S.BlocklistFile, p => { S.BlocklistFile = p; Saved(); if (!c.SnapMode) c.Core.ReloadBlocklist(); blShow(); }, true, "Blocklists (*.dat;*.p2p;*.txt;*.gz;*.zip)|*.dat;*.p2p;*.txt;*.gz;*.zip|All files|*.*")));
+            var blUrl = Ui.Field(S.BlocklistUrl ?? "", 520);
+            blUrl.LostFocus += (s, e) =>
+            {
+                var t = blUrl.Text.Trim(); if (t == (S.BlocklistUrl ?? "")) return;
+                Uri u; if (t.Length > 0 && (!Uri.TryCreate(t, UriKind.Absolute, out u) || (u.Scheme != "http" && u.Scheme != "https"))) { Say("That isn't a web address (http:// or https://)."); return; }
+                S.BlocklistUrl = t.Length == 0 ? null : t; S.BlocklistUpdated = null; S.BlocklistNote = null; Saved();
+                c.UpdateBlocklist(m => { Say(m); blShow(); });
+            };
+            bl.Children.Add(Dialogs.Labeled("From an address", blUrl));
+            var blDays = NumField(S.BlocklistDays, x => { S.BlocklistDays = x; Saved(); }, 1, 90);
+            var blNow = Ui.Btn("Update now", () => { Say("Downloading the blocklist over the VPN..."); c.UpdateBlocklist(m => { Say(m); blShow(); }); }); blNow.Margin = new Thickness(14, 0, 0, 0);
+            var daysRow = new StackPanel { Orientation = Orientation.Horizontal }; daysRow.Children.Add(blDays); var dl = Ui.Muted("days", 12); dl.VerticalAlignment = VerticalAlignment.Center; dl.Margin = new Thickness(8, 0, 0, 0); daysRow.Children.Add(dl); daysRow.Children.Add(blNow);
+            bl.Children.Add(Dialogs.Labeled("Update every", daysRow));
+            blNote = Ui.Muted("", 12, 0); bl.Children.Add(blNote); blShow();
 
             // ---- safety
             var sf = Section(page, "Safety", "Finished downloads are checked for programs, scripts and shortcuts hiding in video or music downloads, and for disguised names like movie.mp4.exe. Hallow Torrents never opens a download by itself.");

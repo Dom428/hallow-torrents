@@ -36,8 +36,9 @@ namespace HallowTorrents.Tests
             var only = args.FirstOrDefault(a => !a.StartsWith("-"));
             try
             {
-                if (only == null || only == "unit") { Names(); Suspicious(); Categories(); Plans(); VpnDecide(); DnsPackets(); HandlerFake(); Defender(); ModeAndContrast(); }
+                if (only == null || only == "unit") { Names(); Suspicious(); Categories(); Plans(); VpnDecide(); DnsPackets(); HandlerFake(); Defender(); ModeAndContrast(); V11Unit(); }
                 if (only == null || only == "swarm") Swarm().Wait();
+                if (only == null || only == "swarm11") Swarm11().Wait();
                 if (only == null || only == "app") AppCopy();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
@@ -207,6 +208,8 @@ namespace HallowTorrents.Tests
         }
         static TorSettings TestSettings(int port, string save) { var s = new TorSettings { Dht = false, Pex = false, Lpd = false, Port = port, SaveFolder = save, ScanDone = false, RatioLimit = 0, MaxActive = 3 }; s.Fix(); return s; }
         static VpnState Vpn(IPAddress ip) { var v = new VpnState { Ok = true, Ip = ip, Adapter = "Fake VPN", AdapterId = "fake" }; v.Dns.Add(IPAddress.Loopback); return v; }
+        // the fake adapter file is read by the watch every 250 ms: write it with a few retries (a sharing clash is a test race, not a bug)
+        static void WriteRetry(string f, string text) { for (int i = 0; ; i++) { try { File.WriteAllText(f, text); return; } catch (IOException) { if (i >= 40) throw; Thread.Sleep(25); } } }
         static bool Wait(Func<bool> c, int ms) { var sw = Stopwatch.StartNew(); while (sw.ElapsedMilliseconds < ms) { if (c()) return true; Thread.Sleep(50); } return c(); }
         static List<TcpConnectionInformation> Conns(int port) { return IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections().Where(c => c.State == TcpState.Established && (c.RemoteEndPoint.Port == port || c.LocalEndPoint.Port == port)).ToList(); }
 
@@ -264,14 +267,14 @@ namespace HallowTorrents.Tests
 
                 // the VPN drops: everything stops within 1 s, no connection from the VPN address stays open
                 var watchFile = Path.Combine(root, "adapters.txt");
-                File.WriteAllText(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.3|127.0.0.1\n");
+                WriteRetry(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.3|127.0.0.1\n");
                 var ts = new TorSettings { VpnSource = "adapter", VpnAdapter = "fake" };
                 var watch = new VpnWatch(() => ts, new FakeNetworks(watchFile), false); Stopwatch dropClock = null; long stoppedMs = -1;
                 watch.Changed += (o, n) => { if (!n.Ok && dropClock != null) { core.SetVpn(n).Wait(); stoppedMs = dropClock.ElapsedMilliseconds; } };
                 watch.Start(); Thread.Sleep(600);
                 Ok(watch.Current.Ok && watch.Current.Ip.Equals(VpnIp), "watch sees the fake VPN adapter up");
                 Ok(Conns(w.SeedPort).Any(c => c.LocalEndPoint.Address.Equals(VpnIp) || c.RemoteEndPoint.Address.Equals(VpnIp)), "connections over the VPN address before the drop");
-                dropClock = Stopwatch.StartNew(); File.WriteAllText(watchFile, "fake|Fake VPN|WireGuard Tunnel|down||\n");
+                dropClock = Stopwatch.StartNew(); WriteRetry(watchFile, "fake|Fake VPN|WireGuard Tunnel|down||\n");
                 Ok(Wait(() => stoppedMs >= 0, 3000) && stoppedMs < 1000, "VPN drop -> engine stopped in " + stoppedMs + " ms (< 1 s)");
                 Ok(!core.EngineUp && core.Snapshot(false).All(v => v.State == "Waiting for VPN" || v.State == "Paused"), "everything waits for the VPN");
                 Ok(Wait(() => !Conns(w.SeedPort).Any(c => c.LocalEndPoint.Address.Equals(VpnIp) || c.RemoteEndPoint.Address.Equals(VpnIp)), 1500) && IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().All(l => l.Port != port), "no connection and no listener left");
@@ -280,12 +283,12 @@ namespace HallowTorrents.Tests
                 lock (w.Announces) w.Announces.Clear();
                 // back up -> rebuilt and bound again
                 watch.Changed += (o, n) => { if (n.Ok) core.SetVpn(n).Wait(); };
-                File.WriteAllText(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.3|127.0.0.1\n");
+                WriteRetry(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.3|127.0.0.1\n");
                 Ok(Wait(() => core.EngineUp, 3000) && core.BoundIp.Equals(VpnIp), "VPN back: engine rebuilt and bound again");
                 await w.Seeder.UpdateSettingsAsync(new EngineSettingsBuilder(w.Seeder.Settings) { MaximumUploadRate = 0 }.ToSettings());
                 Ok(Wait(() => core.Get(e2.Id).CompletedAt != null, 40000), "the paused-by-VPN download finishes after the VPN is back");
                 // the VPN's IP changes -> rebuilt on the new address
-                File.WriteAllText(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.4|127.0.0.1\n");
+                WriteRetry(watchFile, "fake|Fake VPN|WireGuard Tunnel|up|127.0.0.4|127.0.0.1\n");
                 Ok(Wait(() => core.EngineUp && core.BoundIp != null && core.BoundIp.ToString() == "127.0.0.4", 3000), "VPN IP changed: engine stopped and rebuilt on the new address");
                 watch.Dispose(); ticker.Dispose();
 

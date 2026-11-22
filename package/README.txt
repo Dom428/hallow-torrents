@@ -20,12 +20,22 @@ VPN REQUIRED - ALWAYS
 WHAT IT DOES
 - Add .torrent files or magnet links, pick files and folders, a queue, pause / resume, speed limits
   (overall, per torrent, by time of day), ratio and seeding-time limits, categories, DHT / PEX / LPD,
-  encryption, sequential download, super-seeding, force recheck, watch folder, IP blocklist.
+  encryption, sequential download, super-seeding, force recheck, watch folder, IP blocklist, RSS,
+  torrent creation, statistics.
 - While you play (Delta Force, Discovery, Hallow Hub's game, your own list): pauses or limits torrents.
 - Finished downloads are scanned by Microsoft Defender; suspicious files (programs in a video download,
   "movie.mp4.exe", shortcuts) get a warning. Downloads are never opened by themselves.
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
+
+WHAT'S NEW IN 1.1
+- RSS auto-download: feeds checked over the VPN only, rules (words or regular expressions, category,
+  folder, prefer 1080p, avoid CAM / TS), episode tracking so nothing is grabbed twice, optional upgrades.
+- Create torrents from a file or folder (piece size, trackers, web seeds, private, comment, source) and seed.
+- Edit trackers, rename files and folders, move storage, set priorities for all files at once.
+- IP blocklist from an address (P2P / eMule .dat, .gz or .zip), downloaded over the VPN every N days.
+- Statistics: session and all-time totals, ratio, time seeding, time waiting for the VPN, peers blocked.
+- Hallow Browser can hand over magnet links with a category.
 
 WHAT'S NEW IN 1.0
 - The first version.

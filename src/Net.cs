@@ -175,11 +175,19 @@ namespace HallowTorrents
                 .WithPeerConnectionCreator("ipv4", uri => new MonoTorrent.Connections.Peer.SocketPeerConnection(uri, new BoundConnector(ip)))
                 .WithPeerConnectionCreator("ipv6", uri => new MonoTorrent.Connections.Peer.SocketPeerConnection(uri, new RefusingConnector()))
                 .WithHttpClientCreator(af => http(af))
-                .WithTrackerCreator("http", uri => new Tracker(new HttpTrackerConnection(uri, af => http(af), AddressFamily.InterNetwork)))
-                .WithTrackerCreator("https", uri => new Tracker(new HttpTrackerConnection(uri, af => http(af), AddressFamily.InterNetwork)))
-                .WithTrackerCreator("udp", uri => new Tracker(new BoundUdpTracker(uri, ip, servers)))
+                .WithTrackerCreator("http", uri => BoundTracker(uri, ip, servers))
+                .WithTrackerCreator("https", uri => BoundTracker(uri, ip, servers))
+                .WithTrackerCreator("udp", uri => BoundTracker(uri, ip, servers))
                 .WithPortForwarderCreator(() => new NoPortForwarder())
                 .WithDhtCreator(() => new VpnDht(ip, servers));
+        }
+        // a tracker whose every request goes out from the VPN address (also used for trackers you add by hand); null = not http(s)/udp
+        public static ITracker BoundTracker(Uri uri, IPAddress ip, List<IPAddress> dns)
+        {
+            var servers = (dns ?? new List<IPAddress>()).Where(d => d.AddressFamily == AddressFamily.InterNetwork).ToList();
+            if (uri.Scheme == "udp") return new Tracker(new BoundUdpTracker(uri, ip, servers));
+            if (uri.Scheme == "http" || uri.Scheme == "https") return new Tracker(new HttpTrackerConnection(uri, af => BoundHttp.Create(ip, servers), AddressFamily.InterNetwork));
+            return null;
         }
     }
 
