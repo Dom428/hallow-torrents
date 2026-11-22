@@ -142,7 +142,7 @@ namespace HallowTorrents
         {
             var h = GetStdHandle(-11);
             if (h == IntPtr.Zero || h == new IntPtr(-1)) AttachConsole(-1);   // not redirected: print to the console it was started from
-            string reply = string.IsNullOrWhiteSpace(line) ? "error no command" : Send("Torrents", line.Trim(), 5000);
+            string reply = string.IsNullOrWhiteSpace(line) ? "error no command" : Send("Torrents", line.Trim(), line.TrimStart().StartsWith("search") ? 45000 : 5000);
             int code = reply == null ? 2 : reply == "ok" || reply.StartsWith("ok ") ? 0 : 1;
             try
             {

@@ -24,14 +24,14 @@ using WF = System.Windows.Forms;
 [assembly: AssemblyTitle("Hallow Torrents")]
 [assembly: AssemblyProduct("Hallow Torrents")]
 [assembly: AssemblyDescription("A game-aware torrent client that only runs over your VPN")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace HallowTorrents
 {
     public static class Program
     {
-        public const string Version = "1.2";
+        public const string Version = "1.3";
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
 
         [STAThread]
@@ -151,6 +151,8 @@ namespace HallowTorrents
         public IReg Reg = TorSettings.TestDir != null ? (IReg)new FakeReg() : new RealReg();
         public List<TorrentView> SnapViews;   // --snap: made-up torrents
         public Rss Rss;                       // v1.1: RSS auto-download (over the VPN only)
+        public SearchEngine Search;           // v1.3: search through your Prowlarr / Jackett / Torznab feeds (over the VPN only)
+        public SearchOutcome SnapSearch;      // --snap: made-up results
         public Stats SnapStats; public int SnapRanges;   // --snap: made-up statistics
         public Stats StatsNow { get { return SnapMode ? SnapStats : Core.Stats; } }
 
@@ -161,6 +163,7 @@ namespace HallowTorrents
             S.Save();
             Core = new Core(TorSettings.Dir, () => S); Core.Log += Log; Core.Completed += x => Task.Run(() => Finished(x));
             Rss = new Rss(Core, TorSettings.Dir); Rss.Log += Log; Rss.Notify += (t, m) => ui.BeginInvoke(new Action(() => { Notify(t, m); var h = Ticked; if (h != null) h(); }));
+            Search = new SearchEngine(Core, Rss, TorSettings.Dir); Search.Log += Log; CleanSearchTemp();
             var rt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) }; rt.Tick += (s, e) => KickRss(); rt.Start();
             var bt = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) }; bt.Tick += (s, e) => CheckBlocklist(); bt.Start();
             INetworks nets = TorSettings.Fake ? (INetworks)new FakeNetworks(Path.Combine(TorSettings.Dir, "fake-adapters.txt")) : new RealNetworks();
@@ -331,6 +334,37 @@ namespace HallowTorrents
                 }));
             });
         }
+
+        // ---------------- v1.3: search over the pipe ("search <words> [--n 10] [--cat tv]"), then "search-add <id> [--category <c>]"
+        public static string[] SplitSearch(string arg, out int n, out string cat)
+        {
+            n = 10; cat = "";
+            var m = System.Text.RegularExpressions.Regex.Match(arg, @"\s--n\s+(\d+)"); if (m.Success) { n = Math.Max(1, Math.Min(100, int.Parse(m.Groups[1].Value))); arg = arg.Remove(m.Index, m.Length); }
+            m = System.Text.RegularExpressions.Regex.Match(arg, @"\s--cat\s+(\S+)"); if (m.Success) { cat = m.Groups[1].Value.ToLowerInvariant(); arg = arg.Remove(m.Index, m.Length); }
+            return new[] { arg.Trim() };
+        }
+        string PipeSearch(string arg)
+        {
+            int n; string cat; var text = SplitSearch(" " + arg, out n, out cat)[0];
+            if (text.Length == 0) return "error search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]";
+            if (cat.Length > 0 && Torznab.CatParam(cat) == null) return "error no search category called " + cat;
+            var o = Search.Run(SearchQuery.From(text, cat), DateTime.UtcNow).Result;
+            if (o.Locked) return "error waiting for the VPN - searches only go out over it (nothing was sent)";
+            if (o.Error != null) return "error " + o.Error;
+            return "ok " + Family.Json(SearchEngine.Json(o, n));
+        }
+        string PipeSearchAdd(string arg)
+        {
+            var p = SplitAdd(arg); var r = Search.ByToken(p[0]);
+            if (r == null) return "error no search result called " + p[0] + " (search again)";
+            byte[] t; string m; var err = Search.Fetch(r, out t, out m);
+            if (err != null) return "error " + err;
+            var item = m;
+            if (t != null) { var dir = Path.Combine(TorSettings.Dir, "search-tmp"); Directory.CreateDirectory(dir); item = Path.Combine(dir, (r.InfoHash ?? Guid.NewGuid().ToString("N")) + ".torrent"); File.WriteAllBytes(item, t); }
+            var cat = p[1] ?? (S.Cat(r.Category) != null ? r.Category : null); return OnUi(() => AddFromOutside(item, cat));
+        }
+        // the .torrent files a search fetched for the Add window: gone on the next start
+        void CleanSearchTemp() { try { var d = Path.Combine(TorSettings.Dir, "search-tmp"); if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*.torrent")) if ((DateTime.Now - File.GetLastWriteTime(f)).TotalMinutes > 30) File.Delete(f); } catch { } }
 
         // ---------------- adding
         // from outside (double-click, the browser, the pipe): the Add window when it can be shown, otherwise straight in.
@@ -537,6 +571,8 @@ namespace HallowTorrents
             d["blocklistRanges"] = Core.BlocklistRanges;
             // v1.2: whether the Web API is on (never its address, username or anything about who's signed in)
             d["webApi"] = ApiRunning;
+            // v1.3: how many indexers are switched on (never their names, addresses or keys)
+            d["indexers"] = Search == null ? 0 : Search.FeedCount;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -551,6 +587,8 @@ namespace HallowTorrents
                 case "add": { if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1])); }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
+                case "search": return PipeSearch(arg);
+                case "search-add": return PipeSearchAdd(arg);
                 case "open": return OnUi(() => { var p = arg.Length > 0 ? MainWindow.PageId(arg) : null; if (arg.Length > 0 && p == null) return "error no page called " + arg; ShowMain(p); return "ok"; });
                 case "menu": return OnUi(() => "ok " + Family.Json(new Dictionary<string, object> { { "app", "Torrents" }, { "items", MenuItems() } }));
                 case "invoke": return OnUi(() => Invoke(arg));

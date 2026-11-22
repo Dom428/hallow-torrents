@@ -120,6 +120,37 @@ namespace HallowTorrents
                 }
             }
         }
+        // v1.3 (search): one request over the VPN that does NOT follow redirects - the caller decides (an indexer's download link may
+        // redirect to a magnet link). Same rules as Get: no VPN address = no request at all; the socket is bound to it; DNS over it.
+        public class Reply { public byte[] Body; public string Location; public int Status; }
+        public static Reply Fetch(string url, IPAddress vpnIp, List<IPAddress> dns, int maxBytes, TimeSpan timeout)
+        {
+            if (vpnIp == null) throw new LockedException();
+            Uri u; if (!Uri.TryCreate((url ?? "").Trim(), UriKind.Absolute, out u) || (u.Scheme != "http" && u.Scheme != "https")) throw new IOException("Only http:// and https:// addresses can be fetched.");
+            using (var c = BoundHttp.Create(vpnIp, dns ?? new List<IPAddress>(), false))
+            {
+                c.Timeout = timeout;
+                c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "HallowTorrents/" + Program.Version);
+                using (var r = c.GetAsync(u, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+                {
+                    int code = (int)r.StatusCode;
+                    if (code >= 300 && code < 400 && r.Headers.Location != null)
+                    {
+                        var loc = r.Headers.Location; var abs = loc.IsAbsoluteUri ? loc.OriginalString : new Uri(u, loc).ToString();
+                        return new Reply { Status = code, Location = abs };
+                    }
+                    if (!r.IsSuccessStatusCode) throw new IOException("The server answered " + code + " " + r.ReasonPhrase + ".");
+                    var read = r.Content.ReadAsStreamAsync();
+                    if (!read.Wait(timeout)) throw new System.Threading.Tasks.TaskCanceledException();
+                    using (var s = read.Result)
+                    {
+                        var ms = new MemoryStream(); var buf = new byte[81920]; int n; var until = DateTime.UtcNow + timeout;
+                        while ((n = s.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > maxBytes) throw new IOException("It's too big."); if (DateTime.UtcNow > until) throw new System.Threading.Tasks.TaskCanceledException(); }
+                        return new Reply { Status = code, Body = ms.ToArray() };
+                    }
+                }
+            }
+        }
         public static string Why(Exception e)
         {
             var b = e is AggregateException ? e.GetBaseException() : e;

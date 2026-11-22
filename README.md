@@ -38,6 +38,23 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Search (new in 1.3)
+
+Search your **own** indexers from Hallow Torrents: **Prowlarr** or **Jackett** (on this PC or, later, your NAS) - or single **Torznab** feeds. There's no built-in site list and nothing is scraped from torrent websites.
+
+- **Add them:** Search > **Indexers...** > Prowlarr, Jackett or Torznab feed > the address (http://localhost:9696 for Prowlarr, http://localhost:9117 for Jackett) and the **API key** (Prowlarr: Settings > General; Jackett: the top of its page). The indexers inside Prowlarr / Jackett are found for you, each can be switched off. The key is kept **encrypted for your Windows user** (DPAPI) in search.json - never in settings.json, never shown or logged.
+- **Over the VPN only, like everything else:** every search, the indexer list and every .torrent download go out from the VPN-bound socket with names looked up over the VPN. **While the VPN is off nothing is sent** - the page says so. (Prowlarr / Jackett on this PC are reached that way too. On another device, it has to be reachable through your VPN connection.)
+- **All indexers at once**, each with its own timeout (15 s), and a status pill for each: results and time, *timed out* or *error* (hover for why). Uses Torznab properly: 	=caps to see what each one supports, 	vsearch with season / episode (type 
+ight sky s01e02), movie with the IMDb id (type 	t0111161), categories.
+- **Smart ranking.** Release names are read - resolution (480p-2160p), source (Remux, Blu-ray, WEB-DL, WEBRip, HDTV; CAM / TS / TC / screeners count as low quality), codec (x264 / x265 / AV1), HDR / Dolby Vision, audio, group, season / episode - and scored on **health** (seeders, peers), **your profile** (Search > **Ranking...**: e.g. *1080p WEB-DL preferred, avoid CAM, max 8 GB*), **a size that makes sense** for the quality and runtime, and **how reliable the indexer has been**. Click a result to see exactly how its score was made.
+- **Likely fakes go to the bottom, with the reason:** a program (.exe, .scr, .lnk...) in a video's file list (when the indexer gives the files, or after **Check files** fetches its .torrent - optional for the top results automatically), a hint at a password-protected archive, a size far too small for the claimed quality, a brand-new upload with too-good-to-be-true seeders, "codec pack" style names.
+- **Filters and sorting:** quality, size, seeders, indexer, category; sort by the smart score or any column. Results you already have are marked *In your list* (or *RSS has it*).
+- **Download** opens the normal Add window (files, category, folder) - VPN-locked, scanned by Microsoft Defender when it finishes, like any other torrent. **Add to RSS rule** makes a rule for that show or movie that prefers the same quality.
+
+![Search](docs/search.png)
+
+![Search in light mode](docs/search-light.png)
+
 ## Use with Radarr/Sonarr/Prowlarr
 
 New in 1.2: Hallow Torrents can stand in for **qBittorrent**. Radarr, Sonarr and Prowlarr only talk to download clients they know, so Hallow Torrents speaks qBittorrent's Web API v2 - the parts they use (sign-in, version, preferences, categories, add by magnet / .torrent / URL, the torrent list, properties, files, share limits, pause / resume and qBittorrent 5's stop / start, priorities, delete).
@@ -87,15 +104,16 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
 - Pipe `HallowFamily.Torrents.<user>`, also `HallowTorrents.exe --cmd "<line>"`:
   - `ping`, `status` (counts and speeds, VPN lock state, game - never torrent names, hashes or addresses)
   - `add <magnet link or .torrent path> [--category <name>]` - for Hallow Browser and scripts: shows the Add window (or adds straight away if that's switched off); only `magnet:` links and existing `.torrent` files are accepted; `--category` picks one of your categories (and its folder)
-  - `open [transfers|rss|stats|apps|settings]`
+  - `search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]` (1.3) - searches your indexers over the VPN and answers the top N as JSON (title, indexer, size, seeders, peers, score, resolution / source / codec / HDR / audio / group, season / episode, category, flags, an `id`); `error waiting for the VPN...` while it's off (nothing is sent). `search-add <id> [--category <name>]` adds a result through the normal add. Never returns API keys.
+  - `open [transfers|search|rss|stats|apps|settings]`
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
-- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
+- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
 
 ## Good to know
 
-- Your list, settings, RSS feeds and rules (rss.json) and statistics (stats.json) are in `%APPDATA%\HallowTorrents`; downloads go to `Downloads\Hallow Torrents` unless you choose otherwise.
+- Your list, settings, RSS feeds and rules (rss.json), indexers and the ranking profile (search.json, keys encrypted) and statistics (stats.json) are in `%APPDATA%\HallowTorrents`; downloads go to `Downloads\Hallow Torrents` unless you choose otherwise.
 - Local peer discovery talks to your home network (not the internet) and can't be bound to the VPN, so it's off unless you switch it on.
 - Built with the C# compiler in Windows (`build.ps1`). Third-party components and their licences: [licenses/THIRD-PARTY.md](licenses/THIRD-PARTY.md) - MonoTorrent 3.0.2 and its dependencies, all MIT.
-- Tests (`build.ps1 -Tests`, `tests\TorrentsTests.exe`) only use a local swarm on this PC: a local tracker, a local seeder, a local web server for RSS and blocklists, and Hallow Torrents bound to a stand-in VPN address (127.0.0.3). The 1.2 contract tests (`TorrentsTests.exe arr`) replay the requests Radarr, Sonarr and Prowlarr send to qBittorrent against the Web API on 127.0.0.1 - no real *arr app is installed.
+- Tests (`build.ps1 -Tests`, `tests\TorrentsTests.exe`) only use a local swarm on this PC: a local tracker, a local seeder, a local web server for RSS and blocklists, and Hallow Torrents bound to a stand-in VPN address (127.0.0.3). The 1.3 search tests (`TorrentsTests.exe search`) use a local Torznab stand-in (playing Prowlarr and Jackett, with fixture results: good releases, CAMs, fakes with an .exe, wrong sizes, a slow and a broken indexer) and check every request comes from the stand-in VPN address - real indexers are never called. The 1.2 contract tests (`TorrentsTests.exe arr`) replay the requests Radarr, Sonarr and Prowlarr send to qBittorrent against the Web API on 127.0.0.1 - no real *arr app is installed.
 
 Pictures use made-up torrents.

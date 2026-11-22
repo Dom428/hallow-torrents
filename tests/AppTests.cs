@@ -30,6 +30,7 @@ namespace HallowTorrents.Tests
             var dir = Path.Combine(Dir, "app"); Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "settings.json"), "{\"Dht\":false,\"Pex\":false,\"Lpd\":false,\"LegalSeen\":true}");
             File.WriteAllText(Path.Combine(dir, "fake-adapters.txt"), "eth|Ethernet|Realtek PCIe GbE|up|192.168.50.20|\nnl|NordLynx|NordLynx Tunnel|up|127.0.0.5|127.0.0.1\n");
+            WritePipeSearch(dir);   // v1.3: a Torznab stand-in + search.json for the pipe's search
             var psi = new ProcessStartInfo(exe, "--tray") { UseShellExecute = false, CreateNoWindow = true };
             psi.EnvironmentVariables["HALLOW_TORRENTS_TESTDIR"] = dir; psi.EnvironmentVariables["HALLOW_TORRENTS_FAKE"] = "1"; psi.EnvironmentVariables["HALLOW_TORRENTS_HEADLESS"] = "1";
             var app = Process.Start(psi);
@@ -51,9 +52,11 @@ namespace HallowTorrents.Tests
                 Ok(Cmd(exe, dir, "test-list").Contains("Cat Magnet|Waiting for VPN|TV"), "...it's in the TV category");
                 r = Cmd(exe, dir, "add magnet:?xt=urn:btih:3123456789abcdef0123456789abcdef01234567 --category Nope"); Ok(r.StartsWith("error no category called Nope"), "an unknown category is refused: " + r);
                 Ok(Cmd(exe, dir, "add magnet:?xt=urn:btih:3123456789abcdef0123456789abcdef01234567 --category").StartsWith("error"), "--category without a name: error");
+                PipeSearchChecks(exe, dir, false);
                 WriteVpn(dir, true);
                 bool up = false; for (int i = 0; i < 20 && !up; i++) { Thread.Sleep(150); up = Cmd(exe, dir, "test-vpn").Contains("\"engine\":true"); }
                 r = Cmd(exe, dir, "test-vpn"); Ok(up && r.Contains("\"ip\":\"127.0.0.5\""), "Hallow VPN connected: engine bound to the VPN adapter, never Ethernet: " + r);
+                PipeSearchChecks(exe, dir, true);
                 r = Cmd(exe, dir, "status"); var noLog = r.Contains("\"log\"") ? r.Substring(0, r.IndexOf("\"log\"")) : r; Ok(r.Contains("\"vpnLocked\":false") && r.Contains("\"boundIp\":\"127.0.0.5\"") && !noLog.Contains("Test Magnet") && !noLog.Contains("0123456789abcdef"), "status: counts only, no torrent names or hashes");
                 Ok(File.Exists(Path.Combine(dir, "status.json")), "status.json written");
                 Ok(Cmd(exe, dir, "pause-all") == "ok" && Cmd(exe, dir, "test-list").Contains("Test Magnet|Paused"), "pause-all");
@@ -86,7 +89,7 @@ namespace HallowTorrents.Tests
                 using (var c = Process.Start(cp)) { c.StandardOutput.ReadToEnd(); c.WaitForExit(10000); Ok(c.ExitCode == 2, "--cmd when it isn't running -> exit 2"); }
                 Ok(File.ReadAllText(Path.Combine(dir, "torrents.json")).Contains("Test Magnet"), "the list was kept (torrents.json)");
             }
-            finally { try { if (!app.HasExited) app.Kill(); } catch { } }
+            finally { try { if (!app.HasExited) app.Kill(); } catch { } if (PipeTz != null) PipeTz.Dispose(); }
         }
     }
 }

@@ -43,6 +43,34 @@ namespace HallowTorrents
             l[2].Trackers = new List<TrackerView> { new TrackerView { Url = "udp://tracker.example.org:1337/announce", Status = "Working" }, new TrackerView { Url = "https://tracker.example.net/announce", Status = "Working" }, new TrackerView { Url = "http://old-tracker.example.com/announce", Status = "Not working", Message = "no answer from the tracker" } };
             return l;
         }
+        static void MadeSearch(Controller c)
+        {
+            var se = c.Search; var now = DateTime.UtcNow;
+            var p = new Indexer { Id = "i1", Kind = "prowlarr", Name = "Prowlarr", BaseUrl = "http://nas:9696", LastSync = Family.Time(DateTime.Now.AddMinutes(-12)) };
+            p.Feeds.Add(new TzFeed { Id = "f1", Name = "ExampleTracker", Url = "http://nas:9696/1/api", Caps = true, TvSearch = true, MovieSearch = true, Ok = 48, Fail = 1 });
+            p.Feeds.Add(new TzFeed { Id = "f2", Name = "OpenIndex", Url = "http://nas:9696/2/api", Caps = true, TvSearch = true, Ok = 30, Fail = 6 });
+            p.Feeds.Add(new TzFeed { Id = "f3", Name = "SlowIndex", Url = "http://nas:9696/3/api", Caps = true, Ok = 5, Fail = 9 });
+            var j = new Indexer { Id = "i2", Kind = "torznab", Name = "Home feed", BaseUrl = "http://192.168.1.20:9117/api/v2.0/indexers/demo/results/torznab/api", LastSync = Family.Time(DateTime.Now.AddHours(-3)) };
+            j.Feeds.Add(new TzFeed { Id = "f4", Name = "Home feed", Url = j.BaseUrl, Caps = true, Ok = 12 });
+            se.Data.Indexers.Add(p); se.Data.Indexers.Add(j);
+            Func<string, string, long, int, int, int, double, SearchResult> R = (title, feed, size, seeds, peers, cat, hoursOld) =>
+                new SearchResult { Title = title, FeedId = feed, IndexerName = se.Data.Indexers.SelectMany(x => x.Feeds).First(f => f.Id == feed).Name, Size = size, Seeders = seeds, Peers = peers, Cats = new List<int> { cat }, Published = now.AddHours(-hoursOld), Link = "http://nas:9696/dl/" + title.GetHashCode().ToString("x") };
+            const long MB = 1024 * 1024;
+            var list = new List<SearchResult> {
+                R("Night.Sky.S02E06.1080p.WEB-DL.DDP5.1.H.264-NTb", "f1", 2900 * MB, 812, 950, 5040, 20),
+                R("Night.Sky.S02E06.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos.H.265-FLUX", "f1", 7400 * MB, 344, 420, 5045, 19),
+                R("Night.Sky.S02E06.720p.HDTV.x264-SYNCOPY", "f2", 820 * MB, 156, 190, 5030, 30),
+                R("Night.Sky.S02E06.1080p.WEBRip.x265-ELiTE", "f2", 690 * MB, 402, 470, 5040, 18),
+                R("Night Sky S02E06 1080p WEB-DL x264 [password in txt]", "f2", 2100 * MB, 25, 30, 5040, 40),
+                R("Night.Sky.S02E06.1080p.WEB-DL.x264", "f4", 96 * MB, 9500, 9600, 5040, 1),
+                R("Night.Sky.S02E06.CAM.Codec.Pack.Required", "f2", 1400 * MB, 40, 52, 5040, 12),
+                R("Night.Sky.S02.1080p.WEB-DL.DDP5.1.H.264-NTb", "f1", 21500 * MB, 120, 160, 5040, 200),
+                R("Night.Sky.S02E06.480p.x264-mSD", "f4", 210 * MB, 61, 70, 5030, 21) };
+            list[0].InList = false; list[0].InfoHash = "aa11"; list[7].Grabbed = true;
+            c.SnapSearch = new SearchOutcome { Query = SearchQuery.From("night sky s02e06", ""), Ms = 2140, Results = Ranker.Rank(list, se.Data.Profile, id => se.Data.Indexers.SelectMany(x => x.Feeds).First(f => f.Id == id).Reliability, now) };
+            int n = 0; foreach (var r in c.SnapSearch.Results) r.Token = "r" + (++n);
+            c.SnapSearch.Status = new List<FeedStatus> { new FeedStatus { Name = "ExampleTracker", State = "ok", Count = 3, Ms = 640 }, new FeedStatus { Name = "OpenIndex", State = "ok", Count = 4, Ms = 1210 }, new FeedStatus { Name = "SlowIndex", State = "timeout", Error = "No answer within 15 s", Ms = 15000 }, new FeedStatus { Name = "Home feed", State = "ok", Count = 2, Ms = 380 } };
+        }
         static void Set(string dir)
         {
             Directory.CreateDirectory(dir);
@@ -61,12 +89,18 @@ namespace HallowTorrents
             c.Rss.Data.Grabs.Add(new RssGrab { Title = "Night.Sky.S02E05.1080p.WEB-DL.x264", Rule = "Night Sky", At = Family.Time(now.AddHours(-2)), Upgraded = true, Key = "night sky|S02E05" });
             c.SnapStats = Stats.Load(null); c.SnapStats.Down = 412L * 1024 * 1024 * 1024; c.SnapStats.Up = 655L * 1024 * 1024 * 1024; c.SnapStats.SeedSecs = 86400 * 23 + 3600 * 5; c.SnapStats.LockedSecs = 3600 * 2 + 1260; c.SnapStats.Blocked = 1284; c.SnapStats.Since = Family.Time(now.AddDays(-40));
             c.SnapStats.SessionDown = 3200L * 1024 * 1024; c.SnapStats.SessionUp = 1900L * 1024 * 1024; c.SnapStats.SessionSeedSecs = 3600 * 3 + 1500; c.SnapStats.SessionLockedSecs = 240; c.SnapStats.SessionBlocked = 37; c.SnapRanges = 214533;
+            // v1.3: made-up indexers and search results (ranked by the real ranker; nothing is contacted)
+            c.Search = new SearchEngine(null, null, null); MadeSearch(c);
             var w = new MainWindow(c);
             w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "transfers.png"), 1260, 780);
             w.SnapDetail("3", "files"); Snap.Save(w, Path.Combine(dir, "transfers-files.png"), 1260, 780);
             w.SnapDetail("3", "trackers"); Snap.Save(w, Path.Combine(dir, "transfers-trackers.png"), 1260, 780);
             w.Show("rss"); Snap.Save(w, Path.Combine(dir, "rss.png"), 1260, 900);
             w.Show("stats"); Snap.Save(w, Path.Combine(dir, "stats.png"), 1260, 640);
+            w.Show("search"); w.SnapSelect(c.SnapSearch.Results[0].Token); Snap.Save(w, Path.Combine(dir, "search.png"), 1260, 860);
+            w.SnapSelect(c.SnapSearch.Results.First(r => r.Flagged).Token); Snap.Save(w, Path.Combine(dir, "search-flagged.png"), 1260, 860);
+            Snap.Save(Dialogs.IndexersWindow(c, null), Path.Combine(dir, "dialog-indexers.png"), 720, 0);
+            Snap.Save(Dialogs.ProfileWindow(c, null), Path.Combine(dir, "dialog-ranking.png"), 640, 0);
             w.SnapDetail("6", "safety"); Snap.Save(w, Path.Combine(dir, "transfers-flagged.png"), 1260, 780);
             w.SnapDetail("2", "general"); Snap.Save(w, Path.Combine(dir, "transfers-details.png"), 1260, 780);
             // the VPN is off: everything stopped, the banner with Connect

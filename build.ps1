@@ -13,7 +13,7 @@ $out = Join-Path $PSScriptRoot 'HallowTorrents.exe'
 $refs = "$wpf\PresentationFramework.dll", "$wpf\PresentationCore.dll", "$wpf\WindowsBase.dll", "$fw\System.Xaml.dll",
     "$fw\System.Windows.Forms.dll", "$fw\System.Drawing.dll", "$fw\System.Runtime.Serialization.dll", "$fw\System.Core.dll",
     "$fw\System.IO.Compression.dll", "$fw\System.IO.Compression.FileSystem.dll", "$fw\System.Web.Extensions.dll", "$fw\System.Xml.dll",
-    "$fw\Microsoft.VisualBasic.dll", "$fw\netstandard.dll", "$fw\System.Runtime.dll", "$fw\System.Net.Http.dll"
+    "$fw\Microsoft.VisualBasic.dll", "$fw\netstandard.dll", "$fw\System.Runtime.dll", "$fw\System.Net.Http.dll", "$fw\System.Security.dll"
 $refs += Get-ChildItem $lib -Filter *.dll | ForEach-Object FullName
 $common = @('/nologo', '/optimize+', '/nowarn:1685', "/win32icon:$src\hallow.ico", "/resource:$src\Theme.xaml,HallowTorrents.Theme.xaml") + ($refs | ForEach-Object { "/reference:$_" })
 $files = Get-ChildItem $src -Filter *.cs | ForEach-Object FullName

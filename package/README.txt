@@ -28,6 +28,19 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.3
+- Search: add your own Prowlarr or Jackett (or a Torznab feed) with its address and API key on the new
+  Search page (Indexers...). The key is kept encrypted for your Windows user. No built-in site list, no
+  scraping of torrent sites.
+- Every search goes out over the VPN only - while it's off, nothing is sent. All indexers are asked at
+  once, each with a timeout, and you see each one's status.
+- Smart ranking: resolution, source, codec, HDR, audio and group are read from the names and scored on
+  seeders, your preferences (Ranking...: e.g. 1080p WEB-DL, avoid CAM, max 8 GB), size and how reliable
+  the indexer is. Likely fakes (a program in the files, "password" archives, sizes far too small,
+  brand-new uploads with too many seeders, "codec packs") go to the bottom with the reason.
+- Filters (quality, size, seeders, indexer, category), sorting, Download through the normal Add window
+  (VPN lock, Defender scan, categories) and "Add to RSS rule".
+
 WHAT'S NEW IN 1.2
 - Works with Radarr, Sonarr and Prowlarr: turn on the Web API on the new "Radarr / Sonarr" page, set a
   username and password, then add a "qBittorrent" download client in the app (host localhost, port 8080,

@@ -150,7 +150,7 @@ namespace HallowTorrents
         {
             var r = rule == null ? new RssRule { Name = "New rule" } : new RssRule { Id = rule.Id, Name = rule.Name, MustContain = rule.MustContain, MustNotContain = rule.MustNotContain, Regex = rule.Regex, Feeds = rule.Feeds == null ? null : rule.Feeds.ToList(), Category = rule.Category, SaveFolder = rule.SaveFolder, Prefer = rule.Prefer, Avoid = rule.Avoid, Enabled = rule.Enabled, Episodes = rule.Episodes, Paused = rule.Paused, UpgradeHours = rule.UpgradeHours };
             var w = Make("RSS rule - Hallow Torrents", 700); var sp = Body(w);
-            sp.Children.Add(Ui.T(rule == null ? "New download rule" : "Edit " + rule.Name, 15, true, null, 4));
+            sp.Children.Add(Ui.T(rule == null || rule.Id == null ? "New download rule" : "Edit " + rule.Name, 15, true, null, 4));
             var name = Ui.Field(r.Name, 520); sp.Children.Add(Labeled("Name", name, 130));
             var must = Ui.Field(r.MustContain ?? "", 520); var mustNot = Ui.Field(r.MustNotContain ?? "", 520);
             sp.Children.Add(Labeled("Must contain", must, 130)); sp.Children.Add(Labeled("Must not contain", mustNot, 130));

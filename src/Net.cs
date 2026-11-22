@@ -303,9 +303,11 @@ namespace HallowTorrents
     // HTTP(S) trackers and web seeds: our own socket bound to the VPN IP, our own DNS over the VPN, never a system proxy
     public static class BoundHttp
     {
-        public static HttpClient Create(IPAddress ip, List<IPAddress> dns)
+        public static HttpClient Create(IPAddress ip, List<IPAddress> dns) { return Create(ip, dns, true); }
+        // v1.3: redirects = false lets the caller see a redirect itself (an indexer's download link that points at a magnet link)
+        public static HttpClient Create(IPAddress ip, List<IPAddress> dns, bool redirects)
         {
-            var h = new StandardSocketsHttpHandler { UseProxy = false, Proxy = null, ConnectTimeout = TimeSpan.FromSeconds(15) };
+            var h = new StandardSocketsHttpHandler { UseProxy = false, Proxy = null, ConnectTimeout = TimeSpan.FromSeconds(15), AllowAutoRedirect = redirects };
             h.ConnectCallback = (ctx, token) => Task.Run(() =>
             {
                 var addr = DnsVpn.Resolve(ctx.DnsEndPoint.Host, ip, dns);
