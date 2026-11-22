@@ -39,6 +39,23 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Plex and Emby too (new in 1.7)
+
+The page is now **Media server / NAS** and starts with a choice: **Jellyfin / Emby / Plex / None (just copy)**. If you used 1.6, nothing changes - your settings carry on as Jellyfin.
+
+- **Emby:** the same folder names as Jellyfin. Type its address (e.g. `http://192.168.4.197:8096`) and an **API key** (Emby: Dashboard > Advanced (under Expert) > Security > + Add - newer Emby: Settings > API Keys > New API Key; use an admin's key, Emby only lets admins start a scan). **Check the server** shows its name and version (`/emby/System/Info/Public`); after a copy Emby is told about the new folders (`/emby/Library/Media/Updated` with `X-Emby-Token`, falling back to `/emby/Library/Refresh`), once for a batch.
+- **Plex:** Plex's own names - movies `Movies\Title (Year)\Title (Year).mkv`, TV `Shows\Show (Year)\Season 01\Show (Year) - s01e02.mkv` (the year when the name has one). Type the server's address (port **32400** is assumed if you leave it out) and your **X-Plex-Token**:
+  1. open Plex Web (`http://192.168.4.197:32400/web` or app.plex.tv) and sign in as the server's owner,
+  2. open any movie or episode, click **...** (More) > **Get Info**,
+  3. click **View XML** (bottom left) - a new tab opens,
+  4. at the very end of its address is `X-Plex-Token=...`: copy everything after the `=`, paste it and click **Save token**.
+
+  (From Plex's support article *Finding an authentication token / X-Plex-Token*.) Then **Load libraries** and pick your Movies and TV libraries. After a copy Plex scans just the new folder (`/library/sections/<id>/refresh?path=<the folder as Plex sees it>`), once for a batch; if the folder can't be matched to the library's folder, the whole library is scanned. **Check the server** uses `/identity` (no token needed).
+- **None (just copy):** files are copied with Jellyfin-style names and no server is called.
+- **The same rules as 1.6:** the server's address must be on your own network (a public one is refused before connecting), never through the VPN binding; the key / token is kept encrypted for your Windows user (DPAPI, nas.json), sent only in a header (never in a web address) and never shown or logged; the NAS password is never stored. Defender gate, verified resumable copies, per-category rules and the offline queue are unchanged.
+- `nas-status` and status.json's `nas` block gain `server` (`jellyfin` / `emby` / `plex` / `none`) plus `serverAddress` / `serverKey` (set or not - never the address or key).
+
+![Media server / NAS with Plex](docs/nas-plex.png)
 ## Send to Jellyfin (new in 1.6)
 
 Finished downloads can go straight to the **Jellyfin library on your NAS** - the **Jellyfin / NAS** page.
@@ -190,10 +207,10 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
   - `search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]` (1.3) - searches your indexers over the VPN and answers the top N as JSON (title, indexer, size, seeders, peers, score, resolution / source / codec / HDR / audio / group, season / episode, category, flags, an `id`); `error waiting for the VPN...` while it's off (nothing is sent). `search-add <id> [--category <name>]` adds a result through the normal add. Never returns API keys.
   - `list`, `stats`, `pause <hash>`, `resume <hash>` (1.4) - for Hallow Remote and scripts: the list as JSON (name, progress, speeds, state, VPN-locked flag...), statistics, pause / resume one torrent; `add ... --direct` adds without the Add window. All shapes: [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md)
   - `speedtest [ubuntu|<magnet>|<path.torrent>|status|stop]`, `leak-drill [status|--wait]`, `watchdog [resume]` (1.5) - see [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md); never an address
-  - `nas-status` (1.6) - the Send-to-Jellyfin queue as counts
-  - `open [transfers|search|rss|stats|apps|nas|proof|settings]`
+  - `nas-status` (1.6) - the Send-to-NAS queue as counts; 1.7 adds `server` (`jellyfin` / `emby` / `plex` / `none`)
+  - `open [transfers|search|rss|stats|apps|nas|proof|settings]` (`jellyfin`, `emby`, `plex` open the Media server / NAS page too)
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
-- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
+- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`; 1.7 adds `server` inside it), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
 
 ## Good to know
 
@@ -205,5 +222,7 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
 The 1.5 tests (`TorrentsTests.exe unit15`, `proof`, `race`, `benchsmoke`, `app15`) check the profiles (the 1.4 baseline is exactly MonoTorrent's defaults; a live switch keeps the listener on the VPN address), the watchdog on Windows' real table during a download (no false alarm) and with an injected non-VPN row (locked in under a second, stays locked until resumed), real sockets on 0.0.0.0 / IPv6 / this PC's LAN address being caught, the leak drill against the stand-in VPN (PASS, and FAIL when a non-VPN socket appears during the drop), the speed test on the local swarm and Ubuntu's .torrent from a stand-in (never ubuntu.com), the benchmark at small sizes, `race.ps1` against a local qBittorrent Web API stand-in (bound before the torrent is added, put back afterwards) and the pipe of a test copy.
 
 The 1.6 tests (`TorrentsTests.exe unit16`, `nas`, `app16`) use a temp folder as the NAS and a local Jellyfin stand-in: the private-address rules (a public address, a name resolving to one, a mapped drive to one - refused), Jellyfin names, copy and verify, resume after an interrupted copy (and a bad partial file thrown away), never overwriting a different file, offline waiting with back-off, the three category rules, flagged / Defender / still-scanning downloads never sent, the debounced refresh with the key in the header only, the key never in nas.json in plain text or in the log / status / pipe.
+
+The 1.7 tests (`TorrentsTests.exe unit17`, `servers`, `app17`) use local Emby and Plex stand-ins on 127.0.0.1: server info (Emby's `/emby/System/Info/Public`, also when it wants the key; Plex's `/identity` without the token), Plex's library list, the debounced refresh calls (Emby `/Library/Media/Updated`; Plex one partial scan per new folder in the right library at Plex's own path), refused keys / tokens, a removed library, the token only in a header and never in nas.json in plain text, the log, a URL, status or the pipe, Plex's naming, public addresses refused, None (just copy), and 1.6 settings coming up as Jellyfin in a test copy. The only contact with the real NAS was a read-only `GET /identity` (Plex - not answering yet) and `GET /System/Info/Public` (Jellyfin).
 
 Pictures use made-up torrents.

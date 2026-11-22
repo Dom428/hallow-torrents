@@ -21,11 +21,11 @@ namespace HallowTorrents
         readonly Dictionary<string, Button> nav = new Dictionary<string, Button>();
         Border content; TextBlock sayText, meter; Button updateBtn; DispatcherTimer sayTimer;
         public bool Exiting;
-        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "search", "Search", "magnifying-glass" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "apps", "Radarr / Sonarr", "share-from-square" }, new[] { "nas", "Jellyfin / NAS", "folder-tree" }, new[] { "proof", "Speed & leaks", "gauge-high" }, new[] { "settings", "Settings", "gear" } };
+        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "search", "Search", "magnifying-glass" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "apps", "Radarr / Sonarr", "share-from-square" }, new[] { "nas", "Media server / NAS", "folder-tree" }, new[] { "proof", "Speed & leaks", "gauge-high" }, new[] { "settings", "Settings", "gear" } };
         public static string PageId(string s)
         {
             var v = (s ?? "").Trim().ToLowerInvariant(); if (v == "list" || v == "torrents") v = "transfers"; if (v == "find" || v == "indexers") v = "search"; if (v == "webapi" || v == "radarr" || v == "sonarr" || v == "prowlarr" || v == "arr") v = "apps";
-            if (v == "jellyfin" || v == "library") v = "nas";
+            if (v == "jellyfin" || v == "emby" || v == "plex" || v == "media" || v == "library") v = "nas";
             if (v == "speed" || v == "speedtest" || v == "leak-drill" || v == "leaks" || v == "watchdog" || v == "performance") v = "proof";
             return Pages.Any(p => p[0] == v) ? v : null;
         }

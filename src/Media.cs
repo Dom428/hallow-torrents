@@ -110,8 +110,12 @@ namespace HallowTorrents
 
         // where each file goes in the library: (source relative path, target relative path); files that aren't worth handing off
         // (samples, .nfo, .txt, screenshots) are left out. naming: "movie" / "tv" / "keep" (the torrent's own folder layout)
-        public static List<string[]> Plan(string torrentName, IList<TFile> files, string naming)
+        public static List<string[]> Plan(string torrentName, IList<TFile> files, string naming) { return Plan(torrentName, files, naming, "jellyfin"); }
+        // v1.7: style "plex" = Plex's naming guide for TV: "Show (Year)/Season 01/Show (Year) - s01e02.ext" (the year when the name has
+        // one); movies are the same for every server ("Title (Year)/Title (Year).ext")
+        public static List<string[]> Plan(string torrentName, IList<TFile> files, string naming, string style)
         {
+            bool plex = style == "plex";
             var r = new List<string[]>(); files = files ?? new List<TFile>();
             if (naming == "keep")
             {
@@ -145,7 +149,9 @@ namespace HallowTorrents
                 var show = !string.IsNullOrEmpty(p.Title) && p.Title != "Untitled" ? p.Title : tn.Title;
                 if (tn.Kind == "season" || tn.Kind == "episode") { if (string.IsNullOrEmpty(p.Title) || p.Title == "Untitled") show = tn.Title; }
                 show = Safe(show ?? Clean(torrentName));
-                var code = "S" + p.Season.ToString("00") + "E" + p.Episode.ToString("00") + (p.EpisodeEnd > 0 ? "-E" + p.EpisodeEnd.ToString("00") : "");
+                if (plex) { var yr = p.Year > 0 ? p.Year : tn.Year; if (yr > 0 && !show.EndsWith("(" + yr + ")")) show = show + " (" + yr + ")"; }
+                var code = plex ? "s" + p.Season.ToString("00") + "e" + p.Episode.ToString("00") + (p.EpisodeEnd > 0 ? "-e" + p.EpisodeEnd.ToString("00") : "")
+                    : "S" + p.Season.ToString("00") + "E" + p.Episode.ToString("00") + (p.EpisodeEnd > 0 ? "-E" + p.EpisodeEnd.ToString("00") : "");
                 var bse = show + " - " + code;
                 var dir = Path.Combine(show, "Season " + p.Season.ToString("00"));
                 r.Add(new[] { v.Path, Path.Combine(dir, bse + Ext(v.Path)) });

@@ -61,6 +61,11 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "unit" || only == "unit16") V16Unit();
                 if (only == null || only == "nas") { Nas16(); Copy16(); }
                 if (only == null || only == "app16") AppCopy16();
+                // 1.7: Plex and Emby too
+                if (only == null || only == "unit" || only == "unit17") V17Unit();
+                if (only == null || only == "servers") { Emby17(); Plex17(); }
+                if (only == null || only == "app17") AppCopy17();
+                if (only == "real17") Real17();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

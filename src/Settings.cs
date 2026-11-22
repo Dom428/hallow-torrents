@@ -113,8 +113,14 @@ namespace HallowTorrents
         [DataMember] public string NasFolder;
         [DataMember] public string NasMovies = "Movies", NasShows = "Shows";
         [DataMember] public string JellyfinUrl;
+        // ---- v1.7: Plex and Emby too. Which media server is told about new downloads: "jellyfin" / "emby" / "plex" / "none" (just copy).
+        // 1.6 settings have no value and stay Jellyfin. The Emby API key and the X-Plex-Token are in nas.json (DPAPI), like Jellyfin's key.
+        [DataMember] public string MediaServer = "jellyfin";
+        [DataMember] public string EmbyUrl, PlexUrl;
+        [DataMember] public string PlexMovies, PlexShows;   // the Plex library sections (keys from /library/sections) for Movies and TV
+        [DataMember] public string PlexMoviesName, PlexShowsName;
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; NasMovies = "Movies"; NasShows = "Shows"; }
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; NasMovies = "Movies"; NasShows = "Shows"; MediaServer = "jellyfin"; }
 
         public static TorSettings Load()
         {
@@ -142,6 +148,7 @@ namespace HallowTorrents
                     new Category { Name = "Music", Naming = "keep" }, new Category { Name = "Games", Naming = "keep" }, new Category { Name = "Other", Naming = "keep" } };
             foreach (var c in Categories) { if (string.IsNullOrEmpty(c.Naming)) c.Naming = "keep"; if (c.Nas != "copy" && c.Nas != "after" && c.Nas != "now") c.Nas = "off"; }
             if (NasMovies == null) NasMovies = "Movies"; if (NasShows == null) NasShows = "Shows";
+            if (MediaServer != "emby" && MediaServer != "plex" && MediaServer != "none") MediaServer = "jellyfin";   // v1.7: 1.6 settings = Jellyfin
             if (Schedule == null) Schedule = new List<ScheduleRule>();
             if (MaxActive < 1) MaxActive = 1; if (MaxActive > 50) MaxActive = 50;
             if (Encryption != "require") Encryption = "prefer";

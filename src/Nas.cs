@@ -14,6 +14,11 @@
 //   * Jellyfin (optional): its address (private only, like the share) and an API key kept with DPAPI in nas.json, never shown or
 //     logged; GET /System/Info/Public (no key) shows the server; after imports POST /Library/Media/Updated (falls back to
 //     /Library/Refresh), debounced.
+// Hallow Torrents 1.7 - "Plex and Emby too": the media server is Jellyfin / Emby / Plex / none (just copy); 1.6 settings stay Jellyfin.
+//   * Emby: Jellyfin's names and the same calls (Emby's documented /emby/... paths, X-Emby-Token).
+//   * Plex: Plex's TV names ("Show (Year)/Season 01/Show (Year) - s01e02.ext"), an X-Plex-Token (DPAPI, redacted like the keys), the
+//     Movies / TV libraries picked from /library/sections, a partial scan /library/sections/{key}/refresh?path=<folder as Plex sees
+//     it>, debounced; /identity (no token) shows the server. Same private-address-only rule, never through the VPN binding.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -54,6 +59,7 @@ namespace HallowTorrents
     {
         [DataMember] public List<NasItem> Items = new List<NasItem>();
         [DataMember] public string JellyfinKey;   // DPAPI (Secret.Protect), never the key itself
+        [DataMember] public string EmbyKey, PlexToken;   // v1.7: the same (DPAPI)
     }
 
     // where it may copy to (pure apart from the lookup, tested)
@@ -112,65 +118,199 @@ namespace HallowTorrents
         }
     }
 
-    // the Jellyfin server on your network (private address only, never through the VPN binding)
-    public class JellyfinClient
+    // v1.7: a media server's address, checked like the NAS (private address only, never through the VPN binding)
+    public static class ServerNet
     {
-        public Func<string> Url, Key; public Func<string, IPAddress[]> Resolve;
-        public JellyfinClient(Func<string> url, Func<string> key, Func<string, IPAddress[]> resolve) { Url = url; Key = key; Resolve = resolve; }
-        // the address checked like the NAS: null = refused (with why)
-        public IPAddress[] Pinned(out Uri u, out string why)
+        // "192.168.4.197" -> "http://192.168.4.197:<port>"; an address with a scheme is left as it is
+        public static string Normalize(string url, int defPort)
         {
-            why = null; u = null; var url = (Url() ?? "").Trim();
-            if (url.Length == 0) { why = "No Jellyfin address set."; return null; }
-            if (!Uri.TryCreate(url, UriKind.Absolute, out u) || (u.Scheme != "http" && u.Scheme != "https")) { why = "That isn't a web address (http://192.168.4.197:8096)."; return null; }
-            var host = u.Host.Trim('[', ']'); IPAddress lit; var addrs = IPAddress.TryParse(host, out lit) ? new[] { lit } : Resolve(host);
+            url = (url ?? "").Trim(); if (url.Length == 0 || url.Contains("://")) return url;
+            var slash = url.IndexOf('/'); var hostPort = slash < 0 ? url : url.Substring(0, slash); var rest = slash < 0 ? "" : url.Substring(slash);
+            bool hasPort = hostPort.StartsWith("[") ? hostPort.Contains("]:") : hostPort.Contains(":");
+            return "http://" + hostPort + (hasPort ? "" : ":" + defPort) + rest;
+        }
+        // null = refused (with why)
+        public static IPAddress[] Pin(string url, int defPort, string name, Func<string, IPAddress[]> resolve, out Uri u, out string why)
+        {
+            why = null; u = null; url = Normalize(url, defPort);
+            if (url.Length == 0) { why = "No " + name + " address set."; return null; }
+            if (!Uri.TryCreate(url, UriKind.Absolute, out u) || (u.Scheme != "http" && u.Scheme != "https")) { why = "That isn't a web address (http://192.168.4.197:" + defPort + ")."; return null; }
+            var host = u.Host.Trim('[', ']'); IPAddress lit; var addrs = IPAddress.TryParse(host, out lit) ? new[] { lit } : resolve(host);
             if (addrs == null || addrs.Length == 0) { why = "Couldn't find " + host + " on your network."; return null; }
-            if (!PrivateNet.AllPrivate(addrs)) { why = host + " isn't on your own network - Jellyfin is only called at a private address."; return null; }
+            if (!PrivateNet.AllPrivate(addrs)) { why = host + " isn't on your own network - " + name + " is only called at a private address."; return null; }
             return addrs;
         }
-        HttpClient Client(IPAddress[] pinned)
+        public static HttpClient Client(string why, IPAddress[] pinned)
         {
-            var c = Net.DirectHttp("jellyfin", pinned); c.Timeout = TimeSpan.FromSeconds(15);
+            var c = Net.DirectHttp(why, pinned); c.Timeout = TimeSpan.FromSeconds(15);
             c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "HallowTorrents/" + Program.Version);
             return c;
         }
-        // GET /System/Info/Public (no key): "Villa - Jellyfin 4.9.5.0"
+        public static string Redact(string s, string k) { return string.IsNullOrEmpty(k) || s == null ? s : s.Replace(k, "[key]").Replace(Uri.EscapeDataString(k), "[key]"); }
+    }
+
+    // the Jellyfin server on your network - and, since 1.7, Emby (the same API family: X-Emby-Token, /System/Info/Public,
+    // /Library/Media/Updated, /Library/Refresh). Emby's documented paths start with /emby (http://host:8096/emby/System/Info/Public);
+    // its /System/Info/Public is listed as needing a user, so if it answers 401 it's asked again with the key; /Library/Refresh is
+    // admin-only on Emby (an admin's API key).
+    public class JellyfinClient
+    {
+        public Func<string> Url, Key; public Func<string, IPAddress[]> Resolve;
+        public readonly string Kind;   // "Jellyfin" / "Emby"
+        public JellyfinClient(Func<string> url, Func<string> key, Func<string, IPAddress[]> resolve) : this("Jellyfin", url, key, resolve) { }
+        public JellyfinClient(string kind, Func<string> url, Func<string> key, Func<string, IPAddress[]> resolve) { Kind = kind; Url = url; Key = key; Resolve = resolve; }
+        bool Emby { get { return Kind == "Emby"; } }
+        public IPAddress[] Pinned(out Uri u, out string why) { return ServerNet.Pin(Url(), 8096, Kind, Resolve, out u, out why); }
+        // the API path on this server: Emby's under /emby (unless the address already ends with /emby)
+        Uri At(Uri u, string path)
+        {
+            var b = u.AbsolutePath.TrimEnd('/');
+            if (Emby && !b.EndsWith("/emby", StringComparison.OrdinalIgnoreCase)) b += "/emby";
+            return new Uri(u, b + path);
+        }
+        // GET /System/Info/Public (no key): "Villa - Jellyfin 4.9.5.0" / "Villa - Emby 4.8.10.0"
         public string Info(out string error)
         {
             error = null; Uri u; var pin = Pinned(out u, out error); if (pin == null) return null;
             try
             {
-                using (var c = Client(pin))
+                using (var c = ServerNet.Client(Kind.ToLowerInvariant(), pin))
                 {
-                    var t = c.GetStringAsync(new Uri(u, "/System/Info/Public")).GetAwaiter().GetResult();
+                    var r = c.GetAsync(At(u, "/System/Info/Public")).GetAwaiter().GetResult();
+                    if (((int)r.StatusCode == 401 || (int)r.StatusCode == 403) && !string.IsNullOrEmpty(Key()))
+                    {
+                        var m = new HttpRequestMessage(HttpMethod.Get, At(u, "/System/Info/Public")); m.Headers.TryAddWithoutValidation("X-Emby-Token", Key());
+                        r = c.SendAsync(m).GetAwaiter().GetResult();
+                    }
+                    if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) { error = Kind + " wants a sign-in for its server info" + (string.IsNullOrEmpty(Key()) ? " - save the API key first." : " and refused the API key."); return null; }
+                    if (!r.IsSuccessStatusCode) { error = Kind + " answered " + (int)r.StatusCode + "."; return null; }
+                    var t = r.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                     var d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(t);
                     object n, v; d.TryGetValue("ServerName", out n); d.TryGetValue("Version", out v);
-                    return (n ?? "Jellyfin") + " - Jellyfin " + (v ?? "?");
+                    return (n ?? Kind) + " - " + Kind + " " + (v ?? "?");
                 }
             }
-            catch (Exception e) { error = "Jellyfin didn't answer: " + Redact(e.Message); return null; }
+            catch (Exception e) { error = Kind + " didn't answer: " + Redact(e.Message); return null; }
         }
-        // tell Jellyfin about new folders (falls back to a full library scan)
+        // tell the server about new folders (falls back to a full library scan)
         public string Refresh(IList<string> paths)
         {
             Uri u; string why; var pin = Pinned(out u, out why); if (pin == null) return why;
-            var key = Key(); if (string.IsNullOrEmpty(key)) return "No Jellyfin API key set - Jellyfin finds them at its next scheduled scan.";
+            var key = Key(); if (string.IsNullOrEmpty(key)) return "No " + Kind + " API key set - " + Kind + " finds them at its next scheduled scan.";
             try
             {
-                using (var c = Client(pin))
+                using (var c = ServerNet.Client(Kind.ToLowerInvariant(), pin))
                 {
                     c.DefaultRequestHeaders.TryAddWithoutValidation("X-Emby-Token", key);
                     var body = Family.Json(new Dictionary<string, object> { { "Updates", paths.Select(p => (object)new Dictionary<string, object> { { "Path", p }, { "UpdateType", "Created" } }).ToList() } });
-                    var r = c.PostAsync(new Uri(u, "/Library/Media/Updated"), new StringContent(body, Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+                    var r = c.PostAsync(At(u, "/Library/Media/Updated"), new StringContent(body, Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
                     if (r.IsSuccessStatusCode) return null;
-                    if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) return "Jellyfin refused the API key.";
-                    r = c.PostAsync(new Uri(u, "/Library/Refresh"), new StringContent("", Encoding.UTF8)).GetAwaiter().GetResult();
-                    return r.IsSuccessStatusCode ? null : "Jellyfin answered " + (int)r.StatusCode + ".";
+                    if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) return Kind + " refused the API key.";
+                    r = c.PostAsync(At(u, "/Library/Refresh"), new StringContent("", Encoding.UTF8)).GetAwaiter().GetResult();
+                    if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) return Kind + " refused the API key.";
+                    return r.IsSuccessStatusCode ? null : Kind + " answered " + (int)r.StatusCode + ".";
                 }
             }
-            catch (Exception e) { return "Jellyfin didn't answer: " + Redact(e.Message); }
+            catch (Exception e) { return Kind + " didn't answer: " + Redact(e.Message); }
         }
-        string Redact(string s) { var k = Key(); return string.IsNullOrEmpty(k) || s == null ? s : s.Replace(k, "[key]"); }
+        string Redact(string s) { return ServerNet.Redact(s, Key()); }
+    }
+
+    public class PlexSection { public string Key, Title, Type; public List<string> Locations = new List<string>(); }
+
+    // v1.7: Plex Media Server on your network (private address only, never through the VPN binding). Default port 32400.
+    //   GET /identity (no token) = version / claimed; GET /library/sections (X-Plex-Token) = the libraries and their folders as Plex
+    //   sees them; GET /library/sections/{key}/refresh?path=<folder> = a partial scan of just the new folder. The token is sent in the
+    //   X-Plex-Token header (never in a URL), kept with DPAPI in nas.json, redacted from every message.
+    public class PlexClient
+    {
+        public Func<string> Url, Token; public Func<string, IPAddress[]> Resolve;
+        public PlexClient(Func<string> url, Func<string> token, Func<string, IPAddress[]> resolve) { Url = url; Token = token; Resolve = resolve; }
+        public IPAddress[] Pinned(out Uri u, out string why) { return ServerNet.Pin(Url(), 32400, "Plex", Resolve, out u, out why); }
+        Uri At(Uri u, string pathAndQuery) { return new Uri(u, u.AbsolutePath.TrimEnd('/') + pathAndQuery); }
+        HttpResponseMessage Get(HttpClient c, Uri url, bool token)
+        {
+            var m = new HttpRequestMessage(HttpMethod.Get, url); m.Headers.TryAddWithoutValidation("Accept", "application/xml");
+            if (token) m.Headers.TryAddWithoutValidation("X-Plex-Token", Token());
+            return c.SendAsync(m).GetAwaiter().GetResult();
+        }
+        static System.Xml.Linq.XElement Xml(HttpResponseMessage r) { return System.Xml.Linq.XElement.Parse(r.Content.ReadAsStringAsync().GetAwaiter().GetResult()); }
+        static string Attr(System.Xml.Linq.XElement e, string n) { var a = e.Attribute(n); return a == null ? null : a.Value; }
+        // GET /identity (no token): "Plex Media Server 1.41.3 (claimed)"
+        public string Info(out string error)
+        {
+            error = null; Uri u; var pin = Pinned(out u, out error); if (pin == null) return null;
+            try
+            {
+                using (var c = ServerNet.Client("plex", pin))
+                {
+                    var r = Get(c, At(u, "/identity"), false);
+                    if (!r.IsSuccessStatusCode) { error = "Plex answered " + (int)r.StatusCode + "."; return null; }
+                    var x = Xml(r); var v = Attr(x, "version"); var cl = Attr(x, "claimed");
+                    return "Plex Media Server " + (v ?? "?") + (cl == "1" ? " (claimed)" : cl == "0" ? " (not claimed yet - sign in to it once in Plex)" : "");
+                }
+            }
+            catch (Exception e) { error = "Plex didn't answer: " + Redact(e.Message); return null; }
+        }
+        // GET /library/sections: the libraries (movie / show / artist / photo) with their folders
+        public List<PlexSection> Sections(out string error)
+        {
+            error = null; Uri u; var pin = Pinned(out u, out error); if (pin == null) return null;
+            if (string.IsNullOrEmpty(Token())) { error = "No Plex token saved."; return null; }
+            try
+            {
+                using (var c = ServerNet.Client("plex", pin))
+                {
+                    var r = Get(c, At(u, "/library/sections"), true);
+                    if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) { error = "Plex refused the token."; return null; }
+                    if (!r.IsSuccessStatusCode) { error = "Plex answered " + (int)r.StatusCode + "."; return null; }
+                    return Xml(r).Elements("Directory").Select(d => new PlexSection { Key = Attr(d, "key"), Title = Attr(d, "title"), Type = Attr(d, "type"), Locations = d.Elements("Location").Select(l => Attr(l, "path")).Where(p => !string.IsNullOrEmpty(p)).ToList() }).Where(s => !string.IsNullOrEmpty(s.Key)).ToList();
+                }
+            }
+            catch (Exception e) { error = "Plex didn't answer: " + Redact(e.Message); return null; }
+        }
+        // a partial scan per target: { section key, folder as Plex sees it (null = the whole library) }
+        public string Refresh(IList<string[]> targets)
+        {
+            Uri u; string why; var pin = Pinned(out u, out why); if (pin == null) return why;
+            if (string.IsNullOrEmpty(Token())) return "No Plex token saved - Plex finds them at its next scan.";
+            try
+            {
+                using (var c = ServerNet.Client("plex", pin))
+                    foreach (var t in targets)
+                    {
+                        var r = Get(c, At(u, "/library/sections/" + Uri.EscapeDataString(t[0]) + "/refresh" + (string.IsNullOrEmpty(t[1]) ? "" : "?path=" + Uri.EscapeDataString(t[1]))), true);
+                        if ((int)r.StatusCode == 401 || (int)r.StatusCode == 403) return "Plex refused the token.";
+                        if (!r.IsSuccessStatusCode) return "Plex answered " + (int)r.StatusCode + ".";
+                    }
+                return null;
+            }
+            catch (Exception e) { return "Plex didn't answer: " + Redact(e.Message); }
+        }
+        // where a new folder on the NAS is in Plex's eyes: "<share>\Movies\X (2000)" under "<share>\Movies" -> "<location>/X (2000)".
+        // locations = the library's folders as Plex sees them (/data/movies, D:\Media\Movies); with several, the one whose last name
+        // matches the subfolder's. null = can't tell (then the whole library is scanned).
+        public static string MapPath(string folder, string subRoot, IList<string> locations)
+        {
+            if (locations == null || locations.Count == 0 || folder == null || subRoot == null) return null;
+            var f = folder.TrimEnd('\\', '/'); var r = subRoot.TrimEnd('\\', '/');
+            string rel;
+            if (string.Equals(f, r, StringComparison.OrdinalIgnoreCase)) rel = "";
+            else if (f.StartsWith(r + "\\", StringComparison.OrdinalIgnoreCase)) rel = f.Substring(r.Length + 1);
+            else return null;
+            string loc = null;
+            if (locations.Count == 1) loc = locations[0];
+            else
+            {
+                var last = r.Split('\\', '/').Last();
+                var m = locations.Where(l => string.Equals(l.TrimEnd('\\', '/').Split('\\', '/').Last(), last, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (m.Count == 1) loc = m[0];
+            }
+            if (loc == null) return null;
+            var sep = loc.Contains("/") ? '/' : '\\';
+            return loc.TrimEnd('\\', '/') + (rel.Length == 0 ? "" : sep + rel.Replace('\\', sep).Replace('/', sep));
+        }
+        string Redact(string s) { return ServerNet.Redact(s, Token()); }
     }
 
     public class Nas : IDisposable
@@ -179,11 +319,11 @@ namespace HallowTorrents
         public NasData Data = new NasData(); public readonly object Lock = new object();
         public Func<string, Task<string>> RemoveLocal;   // move rules: the torrent leaves the list, its files to the Recycle Bin (tests: a stand-in)
         public Func<string, IPAddress[]> Resolve;          // NAS / Jellyfin host names (PrivateNet: home-network names with Windows' resolver, others over the VPN)
-        public JellyfinClient Jellyfin;
+        public JellyfinClient Jellyfin, Emby; public PlexClient Plex;   // v1.7: Emby and Plex too
         public string LastRefresh, LastRefreshError; public int Refreshes;
         public int RefreshDelayMs = 20000;
         volatile bool stop; readonly AutoResetEvent wake = new AutoResetEvent(false);
-        readonly List<string> pendingRefresh = new List<string>(); DateTime refreshAt = DateTime.MaxValue;
+        readonly List<string[]> pendingRefresh = new List<string[]>(); DateTime refreshAt = DateTime.MaxValue;   // { folder, naming }
         public Func<DateTime> Now = () => DateTime.Now;
 
         public Nas(Core core, Func<TorSettings> settings, Action<string> log)
@@ -193,10 +333,12 @@ namespace HallowTorrents
             RemoveLocal = id => core.Remove(id, true);
             Resolve = h => PrivateNet.Resolve(h, core == null ? null : core.BoundIp, core == null ? null : core.BoundDns);
             Jellyfin = new JellyfinClient(() => settings().JellyfinUrl, () => JellyfinKey, h => Resolve(h));
+            Emby = new JellyfinClient("Emby", () => settings().EmbyUrl, () => EmbyKey, h => Resolve(h));
+            Plex = new PlexClient(() => settings().PlexUrl, () => PlexToken, h => Resolve(h));
             Load();
             foreach (var i in Data.Items.Where(x => x.State == "copying")) i.State = "queued";
         }
-        string Redact(string s) { var k = JellyfinKey; return string.IsNullOrEmpty(k) || s == null ? s : s.Replace(k, "[key]"); }
+        string Redact(string s) { foreach (var k in new[] { JellyfinKey, EmbyKey, PlexToken }) s = ServerNet.Redact(s, k); return s; }
         void Load() { try { if (file != null && File.Exists(file)) using (var f = File.OpenRead(file)) Data = (NasData)new DataContractJsonSerializer(typeof(NasData)).ReadObject(f) ?? new NasData(); } catch { Data = new NasData(); } if (Data.Items == null) Data.Items = new List<NasItem>(); }
         public void Save()
         {
@@ -206,6 +348,20 @@ namespace HallowTorrents
         // the API key: DPAPI in nas.json, never in settings.json, the log, status or the pipe
         public string JellyfinKey { get { return Secret.Unprotect(Data.JellyfinKey); } set { Data.JellyfinKey = string.IsNullOrWhiteSpace(value) ? null : Secret.Protect(value.Trim()); Save(); } }
         public bool HasKey { get { return !string.IsNullOrEmpty(Data.JellyfinKey); } }
+        // v1.7: Emby's API key and the X-Plex-Token, kept the same way
+        public string EmbyKey { get { return Secret.Unprotect(Data.EmbyKey); } set { Data.EmbyKey = string.IsNullOrWhiteSpace(value) ? null : Secret.Protect(value.Trim()); Save(); } }
+        public string PlexToken { get { return Secret.Unprotect(Data.PlexToken); } set { Data.PlexToken = string.IsNullOrWhiteSpace(value) ? null : Secret.Protect(value.Trim()); Save(); } }
+        public bool HasKeyFor(string server) { return !string.IsNullOrEmpty(server == "emby" ? Data.EmbyKey : server == "plex" ? Data.PlexToken : server == "jellyfin" ? Data.JellyfinKey : null); }
+        public void SetKeyFor(string server, string v) { if (server == "emby") EmbyKey = v; else if (server == "plex") PlexToken = v; else if (server == "jellyfin") JellyfinKey = v; }
+        public static string ServerName(string server) { return server == "emby" ? "Emby" : server == "plex" ? "Plex" : server == "none" ? "None" : "Jellyfin"; }
+        public static string UrlOf(TorSettings s) { return s.MediaServer == "emby" ? s.EmbyUrl : s.MediaServer == "plex" ? s.PlexUrl : s.MediaServer == "jellyfin" ? s.JellyfinUrl : null; }
+        // the picked server's info line (or null + error)
+        public string ServerInfo(out string error)
+        {
+            var s = settings(); error = null;
+            if (s.MediaServer == "none") { error = "No media server picked - downloads are only copied."; return null; }
+            return s.MediaServer == "plex" ? Plex.Info(out error) : s.MediaServer == "emby" ? Emby.Info(out error) : Jellyfin.Info(out error);
+        }
 
         public void Start() { new Thread(Loop) { IsBackground = true, Name = "nas", Priority = ThreadPriority.BelowNormal }.Start(); }
         public void Dispose() { stop = true; wake.Set(); }
@@ -231,7 +387,7 @@ namespace HallowTorrents
             if (x.Scan == "scanning" || x.Scan == "waiting") return null;   // Finish.Run calls again when the scan is done
             lock (Lock) if (Data.Items.Any(i => i.Id == x.Id && i.State != "failed")) return null;
             var files = x.FileList.Select((f, i) => new { f, i }).Where(q => x.PrioOf(q.i) > 0).Select(q => q.f).ToList();
-            var plan = Media.Plan(x.Name, files, c.Naming);
+            var plan = Media.Plan(x.Name, files, c.Naming, s.MediaServer == "plex" ? "plex" : "jellyfin");
             if (plan.Count == 0) return Note(x, "Nothing to send to the NAS (no " + (c.Naming == "tv" ? "episodes" : c.Naming == "movie" ? "video" : "files") + ").");
             var sub = SubFolder(s, c);
             // Radarr / Sonarr import from where it is: never moved away
@@ -276,13 +432,37 @@ namespace HallowTorrents
                 i.LocalRemoved = err == null; if (err != null) i.Error = "Copied, but the PC's copy couldn't go to the Recycle Bin: " + err;
                 log("nas: " + i.Id + " " + (err == null ? "seeding stopped, the PC's copy is in the Recycle Bin" : err)); Save();
             }
-            List<string> paths = null;
-            lock (pendingRefresh) if (pendingRefresh.Count > 0 && Now() >= refreshAt) { paths = pendingRefresh.Distinct().ToList(); pendingRefresh.Clear(); refreshAt = DateTime.MaxValue; }
+            List<string[]> paths = null;
+            lock (pendingRefresh) if (pendingRefresh.Count > 0 && Now() >= refreshAt) { paths = pendingRefresh.GroupBy(p => p[0], StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList(); pendingRefresh.Clear(); refreshAt = DateTime.MaxValue; }
             if (paths != null)
             {
-                var err = Jellyfin.Refresh(paths); Refreshes++; LastRefresh = Family.Time(Now()); LastRefreshError = err;
-                log("nas: jellyfin " + (err ?? "asked to look at " + paths.Count + " folder(s)"));
+                var server = settings().MediaServer; if (server == "none") return;
+                string err; int n = paths.Count;
+                if (server == "plex") { var t = PlexTargets(paths, out err); if (err == null) { n = t.Count; err = t.Count == 0 ? null : Plex.Refresh(t); } }
+                else err = (server == "emby" ? Emby : Jellyfin).Refresh(paths.Select(p => p[0]).ToList());
+                Refreshes++; LastRefresh = Family.Time(Now()); LastRefreshError = err;
+                log("nas: " + server + " " + (err ?? "asked to look at " + n + " folder(s)"));
             }
+        }
+        // v1.7: Plex - which library each new folder belongs to (Movies / TV sections you picked) and where it is as Plex sees it
+        public List<string[]> PlexTargets(IList<string[]> paths, out string error)
+        {
+            var s = settings(); error = null; var r = new List<string[]>();
+            if (string.IsNullOrEmpty(s.PlexMovies) && string.IsNullOrEmpty(s.PlexShows)) { error = "Pick Plex's Movies / TV libraries on the Media server page - Plex finds them at its next scan."; return r; }
+            var secs = Plex.Sections(out error); if (secs == null) return r;
+            foreach (var p in paths)
+            {
+                var key = p[1] == "movie" ? s.PlexMovies : p[1] == "tv" ? s.PlexShows : null;
+                if (string.IsNullOrEmpty(key)) continue;   // other categories aren't in a Plex library you picked
+                var sec = secs.FirstOrDefault(x => x.Key == key); if (sec == null) { error = "The Plex library picked for " + (p[1] == "movie" ? "Movies" : "TV") + " isn't there any more - pick it again."; return r; }
+                var sub = p[1] == "movie" ? s.NasMovies : s.NasShows;
+                var subRoot = string.IsNullOrWhiteSpace(sub) ? s.NasFolder : Path.Combine(s.NasFolder ?? "", sub.Trim().Trim('\\'));
+                var t = new[] { key, PlexClient.MapPath(p[0], subRoot, sec.Locations) };
+                if (!r.Any(x => x[0] == t[0] && x[1] == t[1])) r.Add(t);
+            }
+            // a whole-library scan makes partial ones of the same library pointless
+            r.RemoveAll(x => x[1] != null && r.Any(y => y[0] == x[0] && y[1] == null));
+            return r;
         }
         static DateTime ParseTime(string s) { DateTime d; return DateTime.TryParse(s, out d) ? d : DateTime.MinValue; }
         public static TimeSpan Backoff(int attempts) { var s = 30 * Math.Pow(2, Math.Max(0, attempts - 1)); return TimeSpan.FromSeconds(Math.Min(1800, s)); }
@@ -309,7 +489,8 @@ namespace HallowTorrents
                 i.State = "done"; i.Finished = Family.Time(Now()); i.Attempts = 0; i.Copied = i.Bytes; Save();
                 log("nas: sent " + i.Id + " (" + i.Files.Count + " files, verified)");
                 var folders = i.Files.Select(f => Path.Combine(root, f.Dest.Split('\\', '/')[0] == f.Dest ? "" : TopFolder(f.Dest))).Distinct().ToList();
-                lock (pendingRefresh) { pendingRefresh.AddRange(folders); refreshAt = Now().AddMilliseconds(RefreshDelayMs); }
+                var cat = s.Cat(i.Category); var naming = cat == null ? "keep" : cat.Naming;
+                lock (pendingRefresh) { pendingRefresh.AddRange(folders.Select(f => new[] { f, naming })); refreshAt = Now().AddMilliseconds(RefreshDelayMs); }
             }
             catch (Exception e)
             {
@@ -381,7 +562,9 @@ namespace HallowTorrents
             var s = settings(); List<NasItem> items; lock (Lock) items = Data.Items.ToList();
             return new Dictionary<string, object> { { "on", s.NasOn }, { "destination", !string.IsNullOrWhiteSpace(s.NasFolder) }, { "queued", items.Count(i => i.State == "queued") }, { "copying", items.Count(i => i.State == "copying") },
                 { "waiting", items.Count(i => i.State == "waiting") }, { "failed", items.Count(i => i.State == "failed") }, { "done", items.Count(i => i.State == "done") },
-                { "jellyfin", !string.IsNullOrWhiteSpace(s.JellyfinUrl) }, { "jellyfinKey", HasKey }, { "refreshes", Refreshes }, { "lastRefresh", LastRefresh } };
+                { "jellyfin", !string.IsNullOrWhiteSpace(s.JellyfinUrl) }, { "jellyfinKey", HasKey }, { "refreshes", Refreshes }, { "lastRefresh", LastRefresh },
+                // v1.7: which media server, and whether its address / key (Plex: token) are set - never the address or key themselves
+                { "server", s.MediaServer ?? "jellyfin" }, { "serverAddress", !string.IsNullOrWhiteSpace(UrlOf(s)) }, { "serverKey", HasKeyFor(s.MediaServer) } };
         }
     }
 }

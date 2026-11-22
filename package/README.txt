@@ -28,6 +28,14 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.7
+- Plex and Emby too: the page is now "Media server / NAS" with a choice of Jellyfin, Emby, Plex or None
+  (just copy). 1.6 settings carry on as Jellyfin. Emby: same names as Jellyfin, its address and an API
+  key (Dashboard > Advanced > Security > Add). Plex: Plex's names (TV "Show (Year)\Season 01\Show (Year) -
+  s01e02"), its address (port 32400) and your X-Plex-Token - in Plex Web open a movie > ... > Get Info >
+  View XML; the new tab's address ends with X-Plex-Token=... - then Load libraries and pick Movies and TV.
+  Plex scans just the new folder. Keys / tokens are kept encrypted; private addresses only.
+
 WHAT'S NEW IN 1.6
 - Send to Jellyfin (the new "Jellyfin / NAS" page): finished downloads that passed Defender's scan are
   copied to a folder on your NAS (\\192.168.4.197\media) with Jellyfin's names, checked (size and

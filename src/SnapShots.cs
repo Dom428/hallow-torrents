@@ -115,6 +115,10 @@ namespace HallowTorrents
             c.SnapNas.Data.Items.Add(new NasItem { Id = "2", Name = "Night.Sky.S01E02.720p.WEB", Rule = "after", State = "copying", Bytes = 1240000000, Copied = 520000000, Files = new List<NasFile> { new NasFile { Dest = @"Shows\Night Sky\Season 01\Night Sky - S01E02.mkv", Size = 1239000000 }, new NasFile { Dest = @"Shows\Night Sky\Season 01\Night Sky - S01E02.srt", Size = 52000 } } });
             c.SnapNas.Data.Items.Add(new NasItem { Id = "3", Name = "Sintel.2010.4K", Rule = "copy", State = "waiting", Bytes = 4310000000, Error = "The folder isn't reachable (NAS off, the share not mapped yet, or the path is wrong).", NextTry = Family.Time(now.AddMinutes(4)), Files = new List<NasFile> { new NasFile { Dest = @"Movies\Sintel (2010)\Sintel (2010).mkv", Size = 4310000000 } } });
             w.Show("nas"); Snap.Save(w, Path.Combine(dir, "nas.png"), 1260, 1120);
+            // v1.7: the same page with Plex picked (made-up libraries; nothing is contacted)
+            c.S.MediaServer = "plex"; c.S.PlexUrl = "http://192.168.4.197:32400"; c.S.PlexMovies = "1"; c.S.PlexMoviesName = "Movies"; c.S.PlexShows = "2"; c.S.PlexShowsName = "TV Shows";
+            w.Show("nas"); Snap.Save(w, Path.Combine(dir, "nas-plex.png"), 1260, 1500);
+            c.S.MediaServer = "jellyfin";
             c.SnapTripped = "TCP 192.168.1.20:51234 -> 203.0.113.9:6881 (established): on 192.168.1.20, which isn't the VPN's address";
             foreach (var v in c.SnapViews) { v.DownRate = 0; v.UpRate = 0; v.Seeds = 0; v.Leechs = 0; if (!v.Paused) v.State = "Waiting for VPN"; }
             c.SnapLocked = true; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "watchdog-alert.png"), 1260, 780);

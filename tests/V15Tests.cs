@@ -280,7 +280,7 @@ namespace HallowTorrents.Tests
         // ---------------- a tiny HTTP server for stand-ins (one request per connection)
         public class StandIn15 : IDisposable
         {
-            public class Req { public string Method, Path, Body; public byte[] Raw; }
+            public class Req { public string Method, Path, Body, Head; public byte[] Raw; }
             public static byte[] Reply(int code, string type, string body) { var b = Encoding.UTF8.GetBytes(body ?? ""); return Encoding.ASCII.GetBytes("HTTP/1.1 " + code + " X\r\nContent-Type: " + type + "\r\nContent-Length: " + b.Length + "\r\nConnection: close\r\n\r\n").Concat(b).ToArray(); }
             readonly TcpListener l; volatile bool stop; readonly Func<Req, byte[]> handler; public readonly List<Req> Seen = new List<Req>();
             public int Port { get { return ((IPEndPoint)l.LocalEndpoint).Port; } }
@@ -302,7 +302,7 @@ namespace HallowTorrents.Tests
                         bool expect = lines.Any(h => h.StartsWith("Expect: 100-continue", StringComparison.OrdinalIgnoreCase));
                         if (expect) { var cont = Encoding.ASCII.GetBytes("HTTP/1.1 100 Continue\r\n\r\n"); s.Write(cont, 0, cont.Length); }
                         var body = new byte[len]; int got = 0; while (got < len) { int n = s.Read(body, got, len - got); if (n <= 0) break; got += n; }
-                        var req = new Req { Method = first[0], Path = Uri.UnescapeDataString(first[1]), Raw = body, Body = Encoding.GetEncoding("iso-8859-1").GetString(body) };
+                        var req = new Req { Method = first[0], Path = Uri.UnescapeDataString(first[1]), Head = head, Raw = body, Body = Encoding.GetEncoding("iso-8859-1").GetString(body) };
                         lock (Seen) Seen.Add(req);
                         var r = handler(req); s.Write(r, 0, r.Length); s.Flush();
                     }
