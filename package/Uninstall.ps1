@@ -1,9 +1,11 @@
-# Hallow Torrents uninstaller (run from Windows Settings > Apps, or directly). Your downloads are never touched.
+﻿# Hallow Torrents uninstaller (run from Windows Settings > Apps, or directly). Your downloads are never touched.
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\Hallow Torrents'
 Add-Type -AssemblyName System.Windows.Forms
 if ([System.Windows.Forms.MessageBox]::Show("Uninstall Hallow Torrents?`n`nYour downloaded files stay where they are.", 'Uninstall Hallow Torrents', 'YesNo', 'Question') -ne 'Yes') { return }
 if (Get-Process HallowTorrents -ErrorAction SilentlyContinue) { try { & (Join-Path $dest "HallowTorrents.exe") --cmd quit | Out-Null; Start-Sleep -Milliseconds 2500 } catch { } }
 Get-Process HallowTorrents -ErrorAction SilentlyContinue | Stop-Process -Force
+if (Get-Process HallowTorrentsHeadless -ErrorAction SilentlyContinue) { try { & (Join-Path $dest "HallowTorrents.exe") --cmd quit | Out-Null; Start-Sleep -Milliseconds 2500 } catch { } }
+Get-Process HallowTorrentsHeadless -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 600
 Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'HallowTorrents' -ErrorAction SilentlyContinue
 # the .torrent / magnet handler - only where it points at Hallow Torrents

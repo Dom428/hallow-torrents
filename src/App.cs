@@ -24,14 +24,14 @@ using WF = System.Windows.Forms;
 [assembly: AssemblyTitle("Hallow Torrents")]
 [assembly: AssemblyProduct("Hallow Torrents")]
 [assembly: AssemblyDescription("A game-aware torrent client that only runs over your VPN")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion(HallowTorrents.BuildInfo.Version + ".0.0")]
+[assembly: AssemblyFileVersion(HallowTorrents.BuildInfo.Version + ".0.0")]
 
 namespace HallowTorrents
 {
     public static class Program
     {
-        public const string Version = "1.3";
+        public const string Version = BuildInfo.Version;
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
 
         [STAThread]
@@ -39,6 +39,9 @@ namespace HallowTorrents
         {
             int ci = Array.IndexOf(args, "--cmd");
             if (ci >= 0) { Environment.Exit(Family.RunCmd(ci + 1 < args.Length ? args[ci + 1] : "")); return; }
+            // v1.4: NAS / headless mode - the engine, the pipe and the Web API / web interface with no window or tray (HeadlessHost.cs;
+            // HallowTorrentsHeadless.exe is the same thing without WPF)
+            if (args.Contains("--headless")) { Environment.Exit(HeadlessHost.Run(args)); return; }
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
             int si = Array.IndexOf(args, "--snap");
             if (si >= 0 && si + 1 < args.Length)
@@ -85,58 +88,6 @@ namespace HallowTorrents
         static string Res(string name) { using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)) using (var r = new StreamReader(s)) return r.ReadToEnd(); }
     }
 
-    // which game is running: the family's two, your own list, and Hallow Hub's "playing"
-    public static class Games
-    {
-        public static readonly string[] Known = { "DeltaForceClient-Win64-Shipping", "Discovery-d" };
-        public static string Running(IEnumerable<string> extra)
-        {
-            if (TorSettings.Fake) { try { var f = Path.Combine(TorSettings.Dir, "fake-game.txt"); return File.Exists(f) ? File.ReadAllText(f).Trim() : null; } catch { return null; } }
-            foreach (var n in Known.Concat(extra ?? new string[0]).Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var name = n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? n.Substring(0, n.Length - 4) : n;
-                var ps = Process.GetProcessesByName(name); var any = ps.Length > 0; foreach (var p in ps) p.Dispose();
-                if (any) return name == "DeltaForceClient-Win64-Shipping" ? "Delta Force" : name == "Discovery-d" ? "Discovery" : name;
-            }
-            var hub = HubPlaying(); return hub.Count > 0 ? hub[0] : null;
-        }
-        public static List<string> HubPlaying()
-        {
-            var r = new List<string>();
-            try
-            {
-                var f = Path.Combine(Family.DataDir("Hub"), "status.json"); if (!File.Exists(f)) return r;
-                var d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(f)); object v;
-                if (d == null || !d.TryGetValue("running", out v) || !(v is bool) || !(bool)v) return r;
-                if (d.TryGetValue("playing", out v) && v is System.Collections.IEnumerable && !(v is string))
-                    foreach (var x in (System.Collections.IEnumerable)v)
-                    {
-                        if (x is string) r.Add((string)x);
-                        else { var o = x as Dictionary<string, object>; object n; if (o != null && o.TryGetValue("name", out n) && n is string) r.Add((string)n); }
-                    }
-            }
-            catch { }
-            return r;
-        }
-    }
-
-    // speed limits by the time of day (pure, tested)
-    public static class Scheduler
-    {
-        public static ScheduleRule Active(IEnumerable<ScheduleRule> rules, DateTime now)
-        {
-            foreach (var r in rules ?? new ScheduleRule[0])
-            {
-                bool weekend = now.DayOfWeek == DayOfWeek.Saturday || now.DayOfWeek == DayOfWeek.Sunday;
-                if (r.Days == "weekdays" && weekend) continue; if (r.Days == "weekends" && !weekend) continue;
-                int h = now.Hour; bool inside = r.From == r.To ? true : r.From < r.To ? h >= r.From && h < r.To : h >= r.From || h < r.To;
-                if (inside) return r;
-            }
-            return null;
-        }
-        public static int Min(params int[] v) { var nz = v.Where(x => x > 0).ToList(); return nz.Count == 0 ? 0 : nz.Min(); }
-    }
-
     public class Controller
     {
         public TorSettings S = TorSettings.Load();
@@ -172,7 +123,10 @@ namespace HallowTorrents
             Family.Serve("Torrents", Command);
             // v1.2: the qBittorrent-compatible Web API (off unless you turned it on, with a username and password)
             Api = new QbitApi(Core, () => S, a => RunOnUi(() => { a(); S.Fix(); S.Save(); }));
-            Api.Log += Log; WebApi = new ApiServer(Api); ApplyApi();
+            Api.Log += Log; Api.Search = Search;
+            // v1.4: the web interface on the same server (off unless you switch it on, and only while the Web API runs)
+            Api.Ui = new WebUi(Api, () => S) { ConnectVpn = ConnectVpn, Game = () => Game, VpnText = () => Vpn.Ok ? "Connected (" + (Vpn.Server ?? Vpn.Adapter) + ")" : Vpn.Message };
+            WebApi = new ApiServer(Api); ApplyApi();
             Watch.Start();
             var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) }; tick.Tick += (s, e) => Tick(); tick.Start();
             var gt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) }; gt.Tick += (s, e) => CheckGame(); gt.Start();
@@ -211,7 +165,7 @@ namespace HallowTorrents
             string err = null;
             if (!S.ApiOn) ApiStatus = "Off.";
             else if (string.IsNullOrWhiteSpace(S.ApiUser) || string.IsNullOrEmpty(S.ApiPassHash)) { err = "Set a username and password first - it stays off without them."; ApiStatus = err; }
-            else { err = WebApi.Start(S.ApiBind, S.ApiPort); ApiStatus = err == null ? "Running on http://" + S.ApiBind + ":" + S.ApiPort + " - sign-in required." : "Not running: " + err; }
+            else { err = WebApi.Start(S.ApiBind, S.ApiPort); ApiStatus = err == null ? "Running on http://" + S.ApiBind + ":" + S.ApiPort + " - sign-in required." + (S.WebUiOn ? " Web interface: http://" + S.ApiBind + ":" + S.ApiPort + "/ui/" : "") : "Not running: " + err; }
             Log("webapi: " + ApiStatus); WriteStatus();
             return err;
         }
@@ -369,13 +323,13 @@ namespace HallowTorrents
         // ---------------- adding
         // from outside (double-click, the browser, the pipe): the Add window when it can be shown, otherwise straight in.
         // category (v1.1, "add <magnet> --category <c>"): one of your categories - its folder is used, and the Add window has it picked.
-        public string AddFromOutside(string item, string category = null)
+        public string AddFromOutside(string item, string category = null, bool direct = false)
         {
             item = (item ?? "").Trim().Trim('"');
             bool magnet = item.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
             if (!magnet && !(item.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) && File.Exists(item))) return "error only magnet links and .torrent files can be added";
             if (category != null) { var cat = S.Cat(category.Trim()); if (cat == null) return "error no category called " + category.Trim() + " (" + string.Join(", ", S.Categories.Select(c => c.Name)) + ")"; category = cat.Name; }
-            if (S.AskOnAdd && !TorSettings.Headless && !SnapMode) { ShowMain(null); if (main != null) main.AskAdd(item, category); return "ok " + Family.Json(new Dictionary<string, object> { { "asking", true }, { "category", category } }); }
+            if (S.AskOnAdd && !direct && !TorSettings.Headless && !SnapMode) { ShowMain(null); if (main != null) main.AskAdd(item, category); return "ok " + Family.Json(new Dictionary<string, object> { { "asking", true }, { "category", category } }); }
             string err; var x = magnet ? Core.AddMagnet(item, null, category, true, out err) : Core.AddTorrentFile(item, null, category, null, true, out err);
             if (x == null) return "error " + err;
             Notify("Torrent added", x.Name + (Locked ? " - it starts when your VPN is connected." : ""));
@@ -573,6 +527,8 @@ namespace HallowTorrents
             d["webApi"] = ApiRunning;
             // v1.3: how many indexers are switched on (never their names, addresses or keys)
             d["indexers"] = Search == null ? 0 : Search.FeedCount;
+            // v1.4: whether the web interface is served (never its address) and that this is the windowed app
+            d["webUi"] = ApiRunning && S.WebUiOn; d["headless"] = false;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -584,7 +540,7 @@ namespace HallowTorrents
             {
                 case "ping": return "ok " + Family.Json(new Dictionary<string, object> { { "app", "Torrents" }, { "version", Program.Version } });
                 case "status": { var d = StatusData(true); Family.WriteStatus(Family.Json(d)); return "ok " + Family.Json(d); }
-                case "add": { if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1])); }
+                case "add": { var direct = RemoteApi.TakeDirect(ref arg); if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>] [--direct]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1], direct)); }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
                 case "search": return PipeSearch(arg);
@@ -594,6 +550,8 @@ namespace HallowTorrents
                 case "invoke": return OnUi(() => Invoke(arg));
                 case "quit": new Thread(() => { Thread.Sleep(300); ui.BeginInvoke(new Action(Quit)); }) { IsBackground = true }.Start(); return "ok";
             }
+            // v1.4: list, stats, pause <hash>, resume <hash> - what a phone page needs (Hallow Remote; REMOTE-CONTRACT.md)
+            var remote = RemoteApi.Pipe(cmd, arg, Core, Game); if (remote != null) { if (cmd == "pause" || cmd == "resume") WriteStatus(); return remote; }
             if (TorSettings.TestDir != null && cmd.StartsWith("test-")) return OnUi(() => TestCommand(cmd, arg));
             return "error unknown command";
         }

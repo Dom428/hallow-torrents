@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>Hallow Torrents</title>
+<link rel="icon" href="/ui/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/ui/app.css">
+<script src="/ui/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="/ui/icon.svg" alt="" width="22" height="22"><span><b>HALLOW</b> TORRENTS</span></div>
+  <div class="topright">
+    <span id="vpn" class="pill hidden"></span>
+    <button id="connect" class="btn small hidden" type="button">Connect VPN</button>
+    <button id="theme" class="btn small ghost" type="button" title="Light / dark">Auto</button>
+    <button id="logout" class="btn small ghost hidden" type="button">Sign out</button>
+  </div>
+</header>
+
+<main>
+  <section id="login" class="card narrow hidden">
+    <h1>Sign in</h1>
+    <p class="muted">The same username and password as the Radarr / Sonarr page in Hallow Torrents.</p>
+    <form id="loginForm" autocomplete="on">
+      <label>Username <input id="user" name="username" autocomplete="username" required></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">Sign in</button>
+      <p id="loginMsg" class="msg"></p>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <div id="lockBanner" class="banner hidden">
+      <b>Waiting for the VPN.</b> Torrents only run over your VPN - nothing goes out over your normal connection. They start by themselves once it's connected.
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab on" data-tab="transfers" type="button">Transfers</button>
+      <button class="tab" data-tab="search" type="button">Search</button>
+      <button class="tab" data-tab="stats" type="button">Stats</button>
+    </nav>
+
+    <div id="tab-transfers" class="tabpage">
+      <form id="addForm" class="card add">
+        <input id="magnet" placeholder="Paste a magnet link (magnet:?...)" autocomplete="off" spellcheck="false">
+        <select id="addCat" aria-label="Category"></select>
+        <label class="btn file">.torrent file<input id="file" type="file" accept=".torrent,application/x-bittorrent"></label>
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <p id="addMsg" class="msg"></p>
+      <div class="row between">
+        <div id="catChips" class="chips"></div>
+        <div class="row"><button id="pauseAll" class="btn small" type="button">Pause all</button><button id="resumeAll" class="btn small" type="button">Resume all</button></div>
+      </div>
+      <div id="speeds" class="muted small"></div>
+      <div id="list" class="list"></div>
+    </div>
+
+    <div id="tab-search" class="tabpage hidden">
+      <form id="searchForm" class="card add">
+        <input id="q" placeholder="Search your indexers - &quot;show s01e02&quot; or tt0111161" autocomplete="off" spellcheck="false">
+        <select id="sCat" aria-label="Search category">
+          <option value="">All</option><option value="movies">Movies</option><option value="tv">TV</option><option value="music">Music</option>
+          <option value="games">Games</option><option value="software">Software</option><option value="books">Books</option><option value="other">Other</option>
+        </select>
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+      <div id="idxPills" class="chips"></div>
+      <p id="searchMsg" class="msg"></p>
+      <div id="results" class="list"></div>
+    </div>
+
+    <div id="tab-stats" class="tabpage hidden">
+      <div id="stats" class="grid"></div>
+    </div>
+  </section>
+</main>
+<footer class="muted small" id="foot">Hallow Torrents - only over your VPN. Never put this page on the internet.</footer>
+</body>
+</html>

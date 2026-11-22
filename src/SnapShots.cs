@@ -69,7 +69,7 @@ namespace HallowTorrents
             list[0].InList = false; list[0].InfoHash = "aa11"; list[7].Grabbed = true;
             c.SnapSearch = new SearchOutcome { Query = SearchQuery.From("night sky s02e06", ""), Ms = 2140, Results = Ranker.Rank(list, se.Data.Profile, id => se.Data.Indexers.SelectMany(x => x.Feeds).First(f => f.Id == id).Reliability, now) };
             int n = 0; foreach (var r in c.SnapSearch.Results) r.Token = "r" + (++n);
-            c.SnapSearch.Status = new List<FeedStatus> { new FeedStatus { Name = "ExampleTracker", State = "ok", Count = 3, Ms = 640 }, new FeedStatus { Name = "OpenIndex", State = "ok", Count = 4, Ms = 1210 }, new FeedStatus { Name = "SlowIndex", State = "timeout", Error = "No answer within 15 s", Ms = 15000 }, new FeedStatus { Name = "Home feed", State = "ok", Count = 2, Ms = 380 } };
+            c.SnapSearch.Status = new List<FeedStatus> { new FeedStatus { Name = "ExampleTracker", State = "ok", Count = 3, Ms = 640, Local = true }, new FeedStatus { Name = "OpenIndex", State = "ok", Count = 4, Ms = 1210, Local = true }, new FeedStatus { Name = "SlowIndex", State = "timeout", Error = "No answer within 15 s", Ms = 15000, Local = true }, new FeedStatus { Name = "Home feed", State = "ok", Count = 2, Ms = 380, Local = true } };
         }
         static void Set(string dir)
         {
@@ -113,9 +113,9 @@ namespace HallowTorrents
             c.S.HandlerAsked = true;
             w.Show("settings"); Snap.Save(w, Path.Combine(dir, "settings.png"), 1260, 2950);
             // v1.2: the Radarr / Sonarr page (made-up sign-in and addresses; nothing listens)
-            c.S.ApiOn = true; c.S.ApiUser = "radarr"; c.S.ApiPassHash = "made-up"; c.S.ApiAllow = "192.168.1.20";
+            c.S.ApiOn = true; c.S.WebUiOn = true; c.S.ApiUser = "radarr"; c.S.ApiPassHash = "made-up"; c.S.ApiAllow = "192.168.1.20";
             c.S.Categories.Add(new Category { Name = "radarr", SaveFolder = @"\\NAS\downloads\radarr", Naming = "keep" }); c.S.Categories.Add(new Category { Name = "tv-sonarr", SaveFolder = @"\\NAS\downloads\tv-sonarr", Naming = "keep" });
-            w.Show("apps"); Snap.Save(w, Path.Combine(dir, "apps.png"), 1260, 1060);
+            w.Show("apps"); Snap.Save(w, Path.Combine(dir, "apps.png"), 1260, 1300);
             // the dialogs (a made-up .torrent in a temp folder for the Add window)
             var tmp = Path.Combine(Path.GetTempPath(), "HallowTorrentsSnap" + System.Diagnostics.Process.GetCurrentProcess().Id);
             try

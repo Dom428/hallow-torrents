@@ -24,8 +24,10 @@ namespace HallowTorrents.Tests
         {
             readonly TcpListener l; public readonly int Port; readonly List<string> from = new List<string>(); volatile bool stop;
             public Func<string, TzReply> Route;
-            public TzServer() { l = new TcpListener(IPAddress.Loopback, 0); l.Start(); Port = ((IPEndPoint)l.LocalEndpoint).Port; new Thread(Loop) { IsBackground = true }.Start(); }
-            public string Url(string path) { return "http://127.0.0.1:" + Port + path; }
+            public readonly IPAddress Ip;
+            public TzServer() : this(IPAddress.Loopback, 0) { }
+            public TzServer(IPAddress ip, int port) { Ip = ip; l = new TcpListener(ip, port); l.Start(); Port = ((IPEndPoint)l.LocalEndpoint).Port; new Thread(Loop) { IsBackground = true }.Start(); }   // 1.4: any loopback address / port
+            public string Url(string path) { return "http://" + Ip + ":" + Port + path; }
             public List<string> Seen() { lock (from) return from.ToList(); }
             void Loop() { while (!stop) { try { var c = l.AcceptTcpClient(); ThreadPool.QueueUserWorkItem(_ => Serve(c)); } catch { } } }
             void Serve(TcpClient c)

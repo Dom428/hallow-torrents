@@ -40,8 +40,14 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "swarm") Swarm().Wait();
                 if (only == null || only == "swarm11") Swarm11().Wait();
                 if (only == null || only == "arr") Arr12().Wait();
-                if (only == null || only == "search") Search13().Wait();
+                // 1.3's Torznab stand-in on 127.0.0.1 plays a PUBLIC indexer (it must be reached over the VPN), so loopback counts as public
+                // there; 1.4's local-server exception has its own suite (Local14 / Web14)
+                if (only == null || only == "search") Search13AsPublic();
                 if (only == null || only == "app") AppCopy();
+                if (only == null || only == "unit") V14Unit();
+                if (only == null || only == "local") Local14().Wait();
+                if (only == null || only == "web") Web14().Wait();
+                if (only == null || only == "headless") Headless14();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

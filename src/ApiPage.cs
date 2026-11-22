@@ -31,6 +31,14 @@ namespace HallowTorrents
             top.Children.Add(Ui.Switch("Turn on the Web API (qBittorrent Web API v2)", S.ApiOn, on => { S.ApiOn = on; restart(); }));
             status = Ui.T("", 12.5, true, null, 4); top.Children.Add(status); showStatus();
 
+            // ---- v1.4: the web interface on the same server
+            var wu = Section(page, "Web interface (phone and browser)", "A Hallow Torrents page for your phone or another PC: the list, add a magnet link or a .torrent file, pause / resume, categories, search through your indexers, statistics and the VPN lock with a Connect VPN button. It's served by the Web API above - same address, port, username and password, same lock-out and the same protection against other sites - so it's only there while the Web API is on. Use it from this PC (http://localhost:" + S.ApiPort + "/ui/) or, if you picked a home-network or Tailscale address below, from your phone on that network. Never put it on the internet.");
+            wu.Children.Add(Ui.Switch("Serve the web interface at /ui/", S.WebUiOn, on => { S.WebUiOn = on; restart(); Show("apps"); }));
+            var host0 = S.ApiBind == "127.0.0.1" ? "localhost" : S.ApiBind;
+            wu.Children.Add(Ui.T(S.WebUiOn ? "Open http://" + host0 + ":" + S.ApiPort + "/ui/ and sign in with the username and password below." : "Off.", 12.5, true, S.WebUiOn ? Ui.R("Green") : Ui.R("Muted"), 4));
+            var openUi = Ui.Btn("Open in my browser", () => { if (!c.ApiRunning || !S.WebUiOn) { Say("Turn on the Web API and the web interface first."); return; } c.OpenUrl("http://" + host0 + ":" + S.ApiPort + "/ui/"); });
+            openUi.HorizontalAlignment = HorizontalAlignment.Left; wu.Children.Add(openUi);
+
             // ---- where it listens
             var w = Section(page, "Where it listens", "This PC only is safest. Pick a home-network or Tailscale address only if Radarr runs on another device (your NAS) - and put that device in the allowed addresses. It's never put on your VPN or a public address, never on all addresses at once, and requests from the internet are always refused.");
             var opts = new List<string[]> { new[] { "127.0.0.1", "This PC only (127.0.0.1)" } };

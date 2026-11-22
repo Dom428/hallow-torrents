@@ -5,3 +5,5 @@ tests/*.exe
 tests/*.dll
 package/HallowTorrents.exe
 package/*.dll
+HallowTorrentsHeadless.exe
+package/HallowTorrentsHeadless.exe

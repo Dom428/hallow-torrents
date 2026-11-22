@@ -33,6 +33,7 @@ namespace HallowTorrents.Tests
             WritePipeSearch(dir);   // v1.3: a Torznab stand-in + search.json for the pipe's search
             var psi = new ProcessStartInfo(exe, "--tray") { UseShellExecute = false, CreateNoWindow = true };
             psi.EnvironmentVariables["HALLOW_TORRENTS_TESTDIR"] = dir; psi.EnvironmentVariables["HALLOW_TORRENTS_FAKE"] = "1"; psi.EnvironmentVariables["HALLOW_TORRENTS_HEADLESS"] = "1";
+            psi.EnvironmentVariables["HALLOW_TORRENTS_LOOPBACK_PUBLIC"] = "1";   // the pipe's Torznab stand-in plays a public indexer (VPN only)
             var app = Process.Start(psi);
             try
             {
@@ -57,6 +58,7 @@ namespace HallowTorrents.Tests
                 bool up = false; for (int i = 0; i < 20 && !up; i++) { Thread.Sleep(150); up = Cmd(exe, dir, "test-vpn").Contains("\"engine\":true"); }
                 r = Cmd(exe, dir, "test-vpn"); Ok(up && r.Contains("\"ip\":\"127.0.0.5\""), "Hallow VPN connected: engine bound to the VPN adapter, never Ethernet: " + r);
                 PipeSearchChecks(exe, dir, true);
+                PipeContract14(exe, dir);   // 1.4: list / stats / pause / resume / add --direct - the shapes in REMOTE-CONTRACT.md
                 r = Cmd(exe, dir, "status"); var noLog = r.Contains("\"log\"") ? r.Substring(0, r.IndexOf("\"log\"")) : r; Ok(r.Contains("\"vpnLocked\":false") && r.Contains("\"boundIp\":\"127.0.0.5\"") && !noLog.Contains("Test Magnet") && !noLog.Contains("0123456789abcdef"), "status: counts only, no torrent names or hashes");
                 Ok(File.Exists(Path.Combine(dir, "status.json")), "status.json written");
                 Ok(Cmd(exe, dir, "pause-all") == "ok" && Cmd(exe, dir, "test-list").Contains("Test Magnet|Paused"), "pause-all");

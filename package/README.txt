@@ -28,6 +28,20 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.4
+- Web interface for your phone or another PC (off by default): on the "Radarr / Sonarr" page turn on
+  the Web API and "Serve the web interface at /ui/", then open http://localhost:8080/ui/ (or this PC's
+  home-network / Tailscale address on your phone). The list, add a magnet or a .torrent file, pause /
+  resume, categories, search, statistics and Connect VPN. Same sign-in and security as the Web API -
+  never on the internet. Torrents added there still wait for the VPN.
+- Your own Prowlarr / Jackett at a private address (this PC, your NAS, Tailscale) is now reached directly
+  instead of through the VPN - your ISP never sees that traffic. Only for the indexers you added, only if
+  every address the name resolves to is private, and a redirect to a public address still goes through
+  the VPN (or nowhere while it's off). Trackers, peers, RSS and blocklists keep the VPN rule.
+- NAS / headless mode: HallowTorrentsHeadless.exe runs the engine and the web interface with no window
+  on an always-on Windows box. For a Linux NAS see NAS-MODE.md (gluetun + qBittorrent is recommended).
+- For Hallow Remote: the pipe answers list, stats, pause <hash>, resume <hash> and add --direct
+  (REMOTE-CONTRACT.md).
 WHAT'S NEW IN 1.3
 - Search: add your own Prowlarr or Jackett (or a Torznab feed) with its address and API key on the new
   Search page (Indexers...). The key is kept encrypted for your Windows user. No built-in site list, no

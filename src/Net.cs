@@ -271,6 +271,46 @@ namespace HallowTorrents
             }
             throw new IOException("Couldn't look up " + host + " over the VPN" + (last != null ? ": " + last.Message : ""));
         }
+        // v1.4: every A record (the local-server check for indexers needs all of them - one public address = no exception). Not cached.
+        public static List<IPAddress> ResolveAll(string host, IPAddress bind, List<IPAddress> servers)
+        {
+            IPAddress lit; if (IPAddress.TryParse(host, out lit)) return new List<IPAddress> { lit };
+            var list = (servers != null && servers.Count > 0 ? servers : new List<IPAddress>()).Concat(Fallback).Distinct().ToList();
+            Exception last = null;
+            foreach (var srv in list)
+            {
+                try
+                {
+                    using (var u = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                    {
+                        u.Bind(new IPEndPoint(bind, 0)); Net.Note("dns", u.LocalEndPoint); u.ReceiveTimeout = 2500;
+                        ushort id = (ushort)new Random().Next(1, 65535);
+                        var q = Query(host, id); u.SendTo(q, new IPEndPoint(srv, Port));
+                        var buf = new byte[1500]; EndPoint from = new IPEndPoint(IPAddress.Any, 0);
+                        int n = u.ReceiveFrom(buf, ref from);
+                        var all = Answers(buf, n, id);
+                        if (all.Count > 0) return all;
+                    }
+                }
+                catch (Exception e) { last = e; }
+            }
+            throw new IOException("Couldn't look up " + host + " over the VPN" + (last != null ? ": " + last.Message : ""));
+        }
+        public static List<IPAddress> Answers(byte[] r, int n, ushort id)
+        {
+            var res = new List<IPAddress>();
+            if (n < 12 || r[0] != (byte)(id >> 8) || r[1] != (byte)id || (r[3] & 0x0F) != 0) return res;
+            int qd = r[4] << 8 | r[5], an = r[6] << 8 | r[7], p = 12;
+            for (int i = 0; i < qd; i++) { p = Skip(r, p, n); p += 4; }
+            for (int i = 0; i < an && p < n; i++)
+            {
+                p = Skip(r, p, n); if (p + 10 > n) break;
+                int type = r[p] << 8 | r[p + 1], len = r[p + 8] << 8 | r[p + 9]; p += 10;
+                if (type == 1 && len == 4 && p + 4 <= n) res.Add(new IPAddress(new[] { r[p], r[p + 1], r[p + 2], r[p + 3] }));
+                p += len;
+            }
+            return res;
+        }
         public static byte[] Query(string host, ushort id)
         {
             var b = new List<byte> { (byte)(id >> 8), (byte)id, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 };

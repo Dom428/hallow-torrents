@@ -41,7 +41,7 @@ namespace HallowTorrents
         // sources read from files in the test folder; HALLOW_TORRENTS_HEADLESS=1 = no windows or tray.
         public static readonly string TestDir = Env("HALLOW_TORRENTS_TESTDIR");
         public static readonly bool Fake = TestDir != null && Env("HALLOW_TORRENTS_FAKE") == "1";
-        public static readonly bool Headless = TestDir != null && Env("HALLOW_TORRENTS_HEADLESS") == "1";
+        public static bool Headless = TestDir != null && Env("HALLOW_TORRENTS_HEADLESS") == "1";   // 1.4: also --headless / HallowTorrentsHeadless.exe
         public static bool Frozen;   // --snap: never saved
         static string Env(string n) { var v = Environment.GetEnvironmentVariable(n); return string.IsNullOrWhiteSpace(v) ? null : v; }
         public static string Dir { get { return TestDir ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "HallowTorrents"); } }
@@ -101,6 +101,8 @@ namespace HallowTorrents
         [DataMember] public string ApiPassHash;              // a salted PBKDF2 hash (ApiAuth) - never the password itself
         [DataMember] public string ApiAllow;                 // optional allow-list: "192.168.1.20, 100.64.0.0/10" (empty = any local address)
         [DataMember] public int ApiSessionMinutes = 60;      // a sign-in expires after this long unused
+        // ---- v1.4: the web interface at http://<address>:<port>/ui/ - the same server, sign-in and security as the Web API. Off by default.
+        [DataMember] public bool WebUiOn;
 
         [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; }
 

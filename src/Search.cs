@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Security.Cryptography;
@@ -145,7 +146,7 @@ namespace HallowTorrents
         public bool Flagged { get { return Flags.Count > 0; } }
         public string Category { get { return Torznab.HallowCat(Cats, R); } }
     }
-    public class FeedStatus { public string FeedId, Name, State, Error; public int Count; public long Ms; }   // State: ok / error / timeout / locked
+    public class FeedStatus { public string FeedId, Name, State, Error; public int Count; public long Ms; public bool Local; }   // State: ok / error / timeout / locked; Local (1.4) = a private-address indexer manager, reached without the VPN
     public class SearchQuery
     {
         public string Text = "", Mode = "search", Cat = "", ImdbId, TmdbId; public int Season = -1, Episode = -1; public int Limit = 100;
@@ -494,13 +495,18 @@ namespace HallowTorrents
             this.core = core; this.rss = rss; file = dir == null ? null : Path.Combine(dir, "search.json");
             try { if (file != null && File.Exists(file)) using (var f = File.OpenRead(file)) Data = (SearchStore)new DataContractJsonSerializer(typeof(SearchStore)).ReadObject(f); } catch { Data = null; }
             if (Data == null) Data = new SearchStore(); Data.Fix();
-            Http = (url, timeout) =>
-            {
-                if (core == null || !core.EngineUp) throw new VpnFetch.LockedException();
-                return VpnFetch.Fetch(url, core.BoundIp, core.BoundDns, 20 * 1024 * 1024, timeout);
-            };
+            // 1.4: an indexer manager you added at a private address (this PC, your NAS, Tailscale) is reached directly (IndexerNet -
+            // every resolved address must be private, the connection is pinned to them, every redirect is decided again); everything
+            // else only over the VPN, and nothing at all while it's off
+            Http = (url, timeout) => IndexerNet.Fetch(url, timeout, Bases(), VpnIp, VpnDns);
         }
         public bool VpnUp { get { return core != null && core.EngineUp; } }
+        IPAddress VpnIp { get { return core != null && core.EngineUp ? core.BoundIp : null; } }
+        List<IPAddress> VpnDns { get { return core != null && core.EngineUp ? core.BoundDns : null; } }
+        // the indexer base addresses you added and switched on: the only addresses the local-server exception can apply to
+        public List<string> Bases() { lock (Lock) return Data.Indexers.Where(i => i.Enabled).Select(i => i.BaseUrl).ToList(); }
+        public bool IsLocal(string url) { return url != null && IndexerRoute.Decide(url, Bases(), VpnIp, VpnDns).Local; }
+        public bool CanReach(string url) { return VpnUp || IsLocal(url); }
         void L(string s) { var h = Log; if (h != null) try { h(Torznab.Redact(s)); } catch { } }
         public void Save()
         {
@@ -560,7 +566,7 @@ namespace HallowTorrents
         // finds the indexers inside Prowlarr / Jackett and asks each feed what it can do (t=caps) - over the VPN only
         public async Task<string> Sync(Indexer x)
         {
-            if (!VpnUp) return "Waiting for the VPN - indexers are only contacted over it.";
+            if (!CanReach(x.BaseUrl)) return "Waiting for the VPN - indexers are only contacted over it.";
             var key = KeyOf(x); if (key == null) return "The API key can't be read (was it saved by another Windows user?) - enter it again.";
             var timeout = TimeSpan.FromSeconds(Data.Profile.TimeoutSec);
             string err = null;
@@ -601,16 +607,21 @@ namespace HallowTorrents
             if (string.IsNullOrWhiteSpace(q.Text) && q.ImdbId == null && q.TmdbId == null) { o.Error = "Type what to look for."; return o; }
             List<Indexer> idx; lock (Lock) idx = Data.Indexers.Where(i => i.Enabled).ToList();
             if (idx.Count == 0) { o.Error = "Add your Prowlarr or Jackett (or a Torznab feed) first - Search only asks your own indexers."; return o; }
-            if (!VpnUp)
+            // 1.4: while the VPN is off only indexer managers at a private address (the local-server exception) can be asked
+            var reachIdx = VpnUp ? idx : idx.Where(i => IsLocal(i.BaseUrl)).ToList();
+            var lockedFeeds = new List<FeedStatus>();
+            if (!VpnUp) lock (Lock) foreach (var i in idx.Except(reachIdx)) foreach (var f in i.Feeds.Where(f => f.Enabled)) lockedFeeds.Add(new FeedStatus { FeedId = f.Id, Name = f.Name, State = "locked", Error = "VPN off" });
+            if (reachIdx.Count == 0)
             {
                 o.Locked = true; o.Error = "Waiting for the VPN - searches only go out over it, so nothing was sent.";
-                foreach (var f in EnabledFeeds()) o.Status.Add(new FeedStatus { FeedId = f.Id, Name = f.Name, State = "locked", Error = "VPN off" });
+                o.Status.AddRange(lockedFeeds);
                 Last = o; return o;
             }
             // indexers whose feeds (or caps) aren't known yet: find them first
-            foreach (var i in idx.Where(i => i.Feeds.Count == 0 || i.Feeds.Any(f => !f.Caps)).ToList()) await Sync(i).ConfigureAwait(false);
-            var feeds = EnabledFeeds();
-            if (feeds.Count == 0) { o.Error = "None of your indexers are switched on (or found) - check them in Indexers."; Last = o; return o; }
+            foreach (var i in reachIdx.Where(i => i.Feeds.Count == 0 || i.Feeds.Any(f => !f.Caps)).ToList()) await Sync(i).ConfigureAwait(false);
+            var feeds = VpnUp ? EnabledFeeds() : reachIdx.SelectMany(i => { lock (Lock) return i.Feeds.Where(f => f.Enabled).ToList(); }).ToList();
+            if (feeds.Count == 0) { o.Error = "None of your indexers are switched on (or found) - check them in Indexers."; o.Status.AddRange(lockedFeeds); Last = o; return o; }
+            var localFeeds = new HashSet<string>(feeds.Where(f => IsLocal(f.Url)).Select(f => f.Id));
             var timeout = TimeSpan.FromSeconds(Data.Profile.TimeoutSec);
             var keys = new Dictionary<string, string>(); lock (Lock) foreach (var i in idx) foreach (var f in i.Feeds) keys[f.Id] = KeyOf(i);
             var jobs = feeds.Select(f => new { F = f, T = Task.Run(() => Ask(f, keys.ContainsKey(f.Id) ? keys[f.Id] : null, q, timeout)) }).ToList();
@@ -621,8 +632,10 @@ namespace HallowTorrents
                 FeedStatus st;
                 if (!j.T.IsCompleted) { st = new FeedStatus { FeedId = j.F.Id, Name = j.F.Name, State = "timeout", Error = "No answer within " + Data.Profile.TimeoutSec + " s", Ms = (long)timeout.TotalMilliseconds }; Track(j.F, false, timeout.TotalMilliseconds); }
                 else { st = j.T.Result.Item1; if (j.T.Result.Item2 != null) results.AddRange(j.T.Result.Item2); }
+                st.Local = localFeeds.Contains(j.F.Id);
                 o.Status.Add(st);
             }
+            o.Status.AddRange(lockedFeeds);
             // what you already have / RSS already grabbed
             HashSet<string> have; lock (Lock) have = core == null ? new HashSet<string>() : new HashSet<string>(core.All().Select(e => e.Id));
             HashSet<string> grabbed = new HashSet<string>(); if (rss != null) lock (rss.Lock) foreach (var g in rss.Data.Grabs) if (g.Key != null) grabbed.Add(g.Key);
@@ -665,7 +678,7 @@ namespace HallowTorrents
         {
             torrent = null; magnet = r.Magnet;
             if (r.Link == null) return magnet != null ? null : "This result has no link.";
-            if (!VpnUp) return "Waiting for the VPN - the .torrent is only fetched over it.";
+            if (!CanReach(r.Link)) return "Waiting for the VPN - the .torrent is only fetched over it.";
             try
             {
                 var rep = Get(r.Link, TimeSpan.FromSeconds(Math.Max(15, Data.Profile.TimeoutSec)));
@@ -715,7 +728,7 @@ namespace HallowTorrents
         public static Dictionary<string, object> Json(SearchOutcome o, int n)
         {
             var d = new Dictionary<string, object> { { "query", o.Query == null ? null : o.Query.Text }, { "mode", o.Query == null ? null : o.Query.Mode }, { "locked", o.Locked }, { "ms", o.Ms }, { "total", o.Results.Count }, { "count", Math.Min(n, o.Results.Count) } };
-            d["indexers"] = o.Status.Select(s => new Dictionary<string, object> { { "name", s.Name }, { "state", s.State }, { "count", s.Count }, { "ms", s.Ms }, { "error", s.Error } }).ToList();
+            d["indexers"] = o.Status.Select(s => new Dictionary<string, object> { { "name", s.Name }, { "state", s.State }, { "count", s.Count }, { "ms", s.Ms }, { "error", s.Error }, { "local", s.Local } }).ToList();
             d["results"] = o.Results.Take(n).Select(r => new Dictionary<string, object> {
                 { "id", r.Token }, { "title", r.Title }, { "indexer", r.IndexerName }, { "size", r.Size }, { "seeders", r.Seeders }, { "peers", r.Peers },
                 { "score", r.Score }, { "resolution", r.R.ResText }, { "source", r.R.Source }, { "codec", r.R.Codec }, { "hdr", r.R.Hdr }, { "audio", r.R.Audio }, { "group", r.R.Group },

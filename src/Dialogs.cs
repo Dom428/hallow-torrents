@@ -212,19 +212,4 @@ namespace HallowTorrents
             return w;
         }
     }
-
-    public static class Fmt
-    {
-        public static string Bytes(long b)
-        {
-            if (b < 1024) return b + " B"; double v = b / 1024.0; if (v < 1024) return v.ToString("0") + " KB";
-            v /= 1024; if (v < 1024) return v.ToString(v < 10 ? "0.0" : "0") + " MB"; v /= 1024; return v.ToString(v < 10 ? "0.00" : "0.0") + " GB";
-        }
-        public static string Rate(long bps) { return bps <= 0 ? "-" : Bytes(bps) + "/s"; }
-        public static string Span(double secs)
-        {
-            var t = TimeSpan.FromSeconds(secs);
-            return t.TotalDays >= 1 ? (int)t.TotalDays + "d " + t.Hours + "h" : t.TotalHours >= 1 ? (int)t.TotalHours + "h " + t.Minutes + "m" : (int)t.TotalMinutes + "m";
-        }
-    }
 }

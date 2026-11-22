@@ -103,8 +103,8 @@ namespace HallowTorrents
             if (searching) return;
             var text = searchField.Text.Trim(); if (text.Length == 0) { Say("Type what to look for."); return; }
             if (c.SnapMode) return;
-            if (c.Locked) { Say("Connect your VPN first - searches only go out over it (nothing was sent)."); RefreshSearchLock(); return; }
-            searching = true; Say("Searching your indexers over the VPN..."); selTok = null;
+            // 1.4: while the VPN is off only indexer managers at a private address can be asked (Search.Run decides, per indexer)
+            searching = true; Say(c.Locked ? "Searching your local indexer managers (the VPN is off - nothing else is asked)..." : "Searching your indexers..."); selTok = null;
             statusStrip.Children.Clear(); statusStrip.Children.Add(Ui.Muted("Searching...", 12));
             var q = SearchQuery.From(text, sCat);
             Task.Run(() => c.Search.Run(q, DateTime.UtcNow)).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
@@ -141,8 +141,9 @@ namespace HallowTorrents
             {
                 var fg = s.State == "ok" ? "Green" : s.State == "timeout" || s.State == "locked" ? "Amber" : "Red";
                 var p = Ui.Pill(s.Name + "  " + (s.State == "ok" ? s.Count + " \u00B7 " + s.Ms + " ms" : s.State == "timeout" ? "timed out" : s.State == "locked" ? "waiting for VPN" : "error"), fg, fg + "Bg");
-                p.Margin = new Thickness(0, 0, 6, 4); if (s.Error != null) p.ToolTip = s.Error; statusStrip.Children.Add(p);
+                p.Margin = new Thickness(0, 0, 6, 4); if (s.Error != null) p.ToolTip = s.Error; else if (s.Local) p.ToolTip = IndexerRoute.Label; statusStrip.Children.Add(p);
             }
+            if (shown.Status.Any(s => s.Local)) { var lp = Ui.Pill(IndexerRoute.Label, "Lilac", "LilacBg"); lp.Margin = new Thickness(0, 0, 6, 4); statusStrip.Children.Add(lp); }
             if (idxChips != null)
             {
                 idxChips.Children.Clear();
@@ -157,7 +158,7 @@ namespace HallowTorrents
             var shownList = list.ToList();
             if (shownList.Count == 0) { var t = Ui.Muted(shown.Error ?? (shown.Results.Count == 0 ? "Nothing found." : "Nothing matches the filters."), 12.5); t.Margin = new Thickness(14, 16, 14, 16); resultsPanel.Children.Add(t); }
             foreach (var r in shownList.Take(300)) resultsPanel.Children.Add(ResultRow(r));
-            countLine.Text = shownList.Count + " of " + shown.Results.Count + " results" + (shown.Results.Any(r => r.Flagged) ? " \u00B7 " + shown.Results.Count(r => r.Flagged) + " flagged as likely fake" : "") + (shown.Ms > 0 ? " \u00B7 " + (shown.Ms / 1000.0).ToString("0.0") + " s" : "") + " \u00B7 everything went out over the VPN";
+            countLine.Text = shownList.Count + " of " + shown.Results.Count + " results" + (shown.Results.Any(r => r.Flagged) ? " \u00B7 " + shown.Results.Count(r => r.Flagged) + " flagged as likely fake" : "") + (shown.Ms > 0 ? " \u00B7 " + (shown.Ms / 1000.0).ToString("0.0") + " s" : "") + (shown.Status.Any(s => s.Local) ? " \u00B7 local servers directly (private address), everything else over the VPN" : " \u00B7 everything went out over the VPN");
             BuildResultDetails();
         }
         static string Age(DateTime? d)
@@ -225,8 +226,7 @@ namespace HallowTorrents
             if (c.SnapMode) return;
             var cat = c.S.Cat(r.Category) != null ? r.Category : null;
             if (r.Link == null && r.Magnet != null) { AskAdd(r.Magnet, cat); return; }
-            if (c.Locked) { Say("Connect your VPN first - the .torrent is only fetched over it."); return; }
-            Say("Getting the .torrent over the VPN...");
+            Say("Getting the .torrent...");   // Search.Fetch: over the VPN, or straight from a local indexer manager (1.4); waits for the VPN otherwise
             Task.Run(() =>
             {
                 byte[] t; string m; var err = c.Search.Fetch(r, out t, out m); string path = null;
@@ -242,7 +242,6 @@ namespace HallowTorrents
         void CheckFiles(SearchResult r)
         {
             if (c.SnapMode) return;
-            if (c.Locked) { Say("Connect your VPN first - the .torrent is only fetched over it."); return; }
             Say("Checking its files...");
             Task.Run(() => c.Search.Inspect(r, DateTime.UtcNow)).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -260,7 +259,7 @@ namespace HallowTorrents
         {
             var w = Make("Indexers - Hallow Torrents", 720); var sp = Body(w); var se = c.Search;
             sp.Children.Add(Ui.T("Your indexers", 15, true, null, 2));
-            sp.Children.Add(Ui.Muted("Search only asks your own Prowlarr or Jackett (usually on this PC or your NAS) or Torznab feeds you add - it never scrapes torrent sites. Every request goes out over the VPN; while it's off nothing is sent. API keys are kept encrypted for your Windows user.", 12, 10));
+            sp.Children.Add(Ui.Muted("Search only asks your own Prowlarr or Jackett (usually on this PC or your NAS) or Torznab feeds you add - it never scrapes torrent sites. Every request goes out over the VPN; while it's off nothing is sent. The one exception (1.4): a Prowlarr / Jackett at a private address - this PC, your home network or Tailscale - is reached directly, because that traffic never reaches your ISP. API keys are kept encrypted for your Windows user.", 12, 10));
             var list = new StackPanel(); sp.Children.Add(new Border { Child = new ScrollViewer { Content = list, MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, Background = Ui.R("Well"), BorderBrush = Ui.R("Line"), BorderThickness = new Thickness(1), Padding = new Thickness(10, 6, 10, 6) });
             var msg = Ui.Muted("", 12, 0); msg.Margin = new Thickness(0, 6, 0, 0);
             Action fill = null;
@@ -277,8 +276,8 @@ namespace HallowTorrents
                     var sync = Ui.Btn(xx.Kind == "torznab" ? "Test" : "Find indexers", null); sync.Padding = new Thickness(8, 1, 8, 2); sync.FontSize = 11;
                     sync.Click += (s, e) =>
                     {
-                        if (c.SnapMode) return; if (c.Locked) { msg.Text = "Connect your VPN first - indexers are only contacted over it."; return; }
-                        msg.Text = "Asking " + xx.Name + " over the VPN..."; foreach (var f in xx.Feeds) f.Caps = false;
+                        if (c.SnapMode) return;
+                        msg.Text = "Asking " + xx.Name + "..."; foreach (var f in xx.Feeds) f.Caps = false;   // Sync says so if it has to wait for the VPN
                         Task.Run(() => se.Sync(xx)).ContinueWith(t => w.Dispatcher.BeginInvoke(new Action(() => { msg.Text = t.Result ?? xx.Name + ": " + xx.Feeds.Count + " indexer" + (xx.Feeds.Count == 1 ? "" : "s") + " ready."; fill(); if (changed != null) changed(); })));
                     };
                     acts.Children.Add(sync);
@@ -288,6 +287,10 @@ namespace HallowTorrents
                     var info = new StackPanel();
                     info.Children.Add(Ui.T(xx.Name == xx.KindName ? xx.Name : xx.Name + "  \u00B7  " + xx.KindName, 12.5, true));
                     var u = Ui.Muted(Torznab.Redact(xx.BaseUrl) + (xx.LastError != null ? "  -  " + xx.LastError : xx.LastSync != null ? "  -  checked " + xx.LastSync.Replace("T", " ") : "  -  not checked yet"), 11.5); u.TextTrimming = TextTrimming.CharacterEllipsis; u.TextWrapping = TextWrapping.NoWrap; if (xx.LastError != null) u.Foreground = Ui.R("Red"); info.Children.Add(u);
+                    // 1.4: the local-server exception - shown only when every address it resolves to is private
+                    var localLine = Ui.T("\u2022 " + IndexerRoute.Label, 11.5, true, Ui.R("Lilac")); localLine.Visibility = Visibility.Collapsed; info.Children.Add(localLine);
+                    if (c.SnapMode) localLine.Visibility = PrivateNet.LooksLocal(xx.BaseUrl) ? Visibility.Visible : Visibility.Collapsed;   // no lookups in --snap
+                    else { var bu = xx.BaseUrl; Task.Run(() => se.IsLocal(bu)).ContinueWith(t => w.Dispatcher.BeginInvoke(new Action(() => localLine.Visibility = !t.IsFaulted && t.Result ? Visibility.Visible : Visibility.Collapsed))); }
                     head.Children.Add(info); row.Children.Add(head);
                     if (xx.Kind != "torznab" && xx.Feeds.Count > 0)
                     {
@@ -322,8 +325,7 @@ namespace HallowTorrents
                 var err = se.AddIndexer(kind, name.Text, url.Text, keyBox.Password, out x);
                 if (err != null) { msg.Text = err; msg.Foreground = Ui.R("Red"); return; }
                 keyBox.Password = ""; url.Text = ""; name.Text = ""; msg.Foreground = Ui.R("Muted"); fill(); if (changed != null) changed();
-                if (c.Locked) { msg.Text = "Added - it's checked once your VPN is on."; return; }
-                msg.Text = "Added - asking it over the VPN...";
+                msg.Text = "Added - asking it...";
                 Task.Run(() => se.Sync(x)).ContinueWith(t => w.Dispatcher.BeginInvoke(new Action(() => { msg.Text = t.Result ?? x.Name + ": " + x.Feeds.Count + " indexer" + (x.Feeds.Count == 1 ? "" : "s") + " ready."; fill(); if (changed != null) changed(); })));
             }, true);
             add.Margin = new Thickness(0); row2.Children.Add(add);

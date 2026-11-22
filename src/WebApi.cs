@@ -157,6 +157,7 @@ namespace HallowTorrents
     public class ApiResponse
     {
         public int Code = 200; public string Type = "text/plain; charset=UTF-8"; public byte[] Body = new byte[0]; public string SetCookie;
+        public Dictionary<string, string> Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // 1.4: CSP, Location...
         public static ApiResponse Text(int code, string text) { return new ApiResponse { Code = code, Body = Encoding.UTF8.GetBytes(text ?? "") }; }
         public static ApiResponse Json(object o) { return new ApiResponse { Type = "application/json", Body = Encoding.UTF8.GetBytes(Family.Json(o)) }; }
     }
@@ -232,7 +233,7 @@ namespace HallowTorrents
         }
         public static string Reason(int code)
         {
-            switch (code) { case 200: return "OK"; case 400: return "Bad Request"; case 401: return "Unauthorized"; case 403: return "Forbidden"; case 404: return "Not Found"; case 405: return "Method Not Allowed"; case 409: return "Conflict"; case 413: return "Payload Too Large"; case 415: return "Unsupported Media Type"; default: return code >= 500 ? "Internal Server Error" : "OK"; }
+            switch (code) { case 200: return "OK"; case 302: return "Found"; case 400: return "Bad Request"; case 401: return "Unauthorized"; case 403: return "Forbidden"; case 404: return "Not Found"; case 405: return "Method Not Allowed"; case 409: return "Conflict"; case 413: return "Payload Too Large"; case 415: return "Unsupported Media Type"; default: return code >= 500 ? "Internal Server Error" : "OK"; }
         }
     }
 
@@ -255,17 +256,22 @@ namespace HallowTorrents
         readonly List<Pending> pending = new List<Pending>();
         public int PendingCount { get { lock (pending) return pending.Count; } }
         public Func<string, byte[]> FetchUrl;   // tests can swap it; by default over the VPN only
+        public SearchEngine Search;             // 1.4: your indexers (the local-server exception for their download links) and the web UI's search
+        public WebUi Ui;                        // 1.4: the web interface at /ui/ (null = not served)
 
         public ApiResponse Handle(ApiRequest r)
         {
             try
             {
+                // 1.4: the web interface (same listener, same sign-in, CSRF and CSP - WebUi.cs)
+                if (Ui != null && (r.Path == "/ui" || r.Path.StartsWith("/ui/", StringComparison.Ordinal))) return Ui.Handle(r);
                 if (!r.Path.StartsWith("/api/v2/", StringComparison.Ordinal))
-                    return r.Path == "/" ? ApiResponse.Text(200, "Hallow Torrents - qBittorrent-compatible Web API v2 for Radarr, Sonarr and Prowlarr. There's no web page here.") : ApiResponse.Text(404, "Not Found");
+                {
+                    if (r.Path == "/" && Ui != null && Ui.Enabled) { var red = ApiResponse.Text(302, ""); red.Headers["Location"] = "/ui/"; return red; }
+                    return r.Path == "/" ? ApiResponse.Text(200, "Hallow Torrents - qBittorrent-compatible Web API v2 for Radarr, Sonarr and Prowlarr. The web interface (/ui/) is switched off.") : ApiResponse.Text(404, "Not Found");
+                }
                 // CSRF: a browser page from another site can't drive it (qBittorrent does the same)
-                var origin = r.Header("Origin"); var referer = r.Header("Referer"); var host = r.Header("Host") ?? "";
-                var from = !string.IsNullOrEmpty(origin) && origin != "null" ? origin : referer;
-                if (!string.IsNullOrEmpty(from)) { Uri u; if (!Uri.TryCreate(from, UriKind.Absolute, out u) || !string.Equals(u.Authority, host, StringComparison.OrdinalIgnoreCase)) return ApiResponse.Text(401, "Unauthorized"); }
+                if (CrossSite(r)) return ApiResponse.Text(401, "Unauthorized");
                 var path = r.Path.Substring(8);
                 if (path == "auth/login") return Login(r);
                 var sid = r.Cookie("SID");
@@ -275,16 +281,32 @@ namespace HallowTorrents
             catch (Exception e) { L("error " + r.Path + ": " + e.Message); return ApiResponse.Text(500, "Internal Server Error"); }
         }
 
+        // a request whose Origin / Referer is another site (qBittorrent's CSRF check; the web interface uses it too)
+        public static bool CrossSite(ApiRequest r)
+        {
+            var origin = r.Header("Origin"); var referer = r.Header("Referer"); var host = r.Header("Host") ?? "";
+            var from = !string.IsNullOrEmpty(origin) && origin != "null" ? origin : referer;
+            if (string.IsNullOrEmpty(from)) return false;
+            Uri u; return !Uri.TryCreate(from, UriKind.Absolute, out u) || !string.Equals(u.Authority, host, StringComparison.OrdinalIgnoreCase);
+        }
         ApiResponse Login(ApiRequest r)
         {
             if (r.Method != "POST") return ApiResponse.Text(405, "Method Not Allowed");
-            if (Guard.Banned(r.Remote)) return ApiResponse.Text(403, "Your IP address has been banned after too many failed authentication attempts.");
+            string sid, why; var code = SignIn(r, out sid, out why);
+            if (sid == null) return code == 403 ? ApiResponse.Text(403, why) : ApiResponse.Text(200, "Fails.");
+            var res = ApiResponse.Text(200, "Ok."); res.SetCookie = "SID=" + sid + "; HttpOnly; SameSite=Strict; path=/";
+            return res;
+        }
+        // the one sign-in check (API and web interface): the lock-out, the hash, a new session. sid = null when it failed.
+        public int SignIn(ApiRequest r, out string sid, out string why)
+        {
+            sid = null; why = null;
+            if (Guard.Banned(r.Remote)) { why = "Your IP address has been banned after too many failed authentication attempts."; return 403; }
             var s = S; var user = r.Arg("username") ?? ""; var pass = r.Arg("password") ?? "";
             bool ok = !string.IsNullOrWhiteSpace(s.ApiUser) && !string.IsNullOrEmpty(s.ApiPassHash) && string.Equals(user, s.ApiUser, StringComparison.Ordinal) & ApiAuth.Check(pass, s.ApiPassHash);
-            if (!ok) { Guard.Failed(r.Remote); L("wrong sign-in from " + r.Remote); Thread.Sleep(300); return ApiResponse.Text(200, "Fails."); }
+            if (!ok) { Guard.Failed(r.Remote); L("wrong sign-in from " + r.Remote); Thread.Sleep(300); why = "Wrong username or password."; return 401; }
             Guard.Succeeded(r.Remote);
-            var res = ApiResponse.Text(200, "Ok."); res.SetCookie = "SID=" + Guard.NewSession() + "; HttpOnly; SameSite=Strict; path=/";
-            L("signed in from " + r.Remote); return res;
+            sid = Guard.NewSession(); L("signed in from " + r.Remote); return 200;
         }
 
         static readonly HashSet<string> postOnly = new HashSet<string> { "auth/logout", "app/setPreferences", "app/shutdown", "torrents/add", "torrents/delete", "torrents/pause", "torrents/resume", "torrents/stop", "torrents/start",
@@ -617,7 +639,19 @@ namespace HallowTorrents
         Entry FromUrl(Pending q, out string err)
         {
             err = null; byte[] data;
-            try { data = FetchUrl != null ? FetchUrl(q.Url) : Core.EngineUp ? VpnFetch.Get(q.Url, Core.BoundIp, Core.BoundDns, 20 * 1024 * 1024) : null; }
+            try
+            {
+                // 1.4: a link to one of YOUR indexer managers at a private address (Radarr hands over Prowlarr's download links) is fetched
+                // straight from it - every redirect decided again, a public one only over the VPN; anything else over the VPN only
+                if (FetchUrl == null && Search != null && Search.IsLocal(q.Url))
+                {
+                    var rep = IndexerNet.Get(q.Url, TimeSpan.FromSeconds(20), Search.Bases(), Core.EngineUp ? Core.BoundIp : null, Core.EngineUp ? Core.BoundDns : null);
+                    if (rep.Location != null && rep.Location.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase)) return Core.AddMagnet(rep.Location, q.Save, q.Category, q.Start, out err);
+                    if (rep.Location != null) { err = "too many redirects"; return null; }
+                    data = rep.Body;
+                }
+                else data = FetchUrl != null ? FetchUrl(q.Url) : Core.EngineUp ? VpnFetch.Get(q.Url, Core.BoundIp, Core.BoundDns, 20 * 1024 * 1024) : null;
+            }
             catch (Exception e) { err = VpnFetch.Why(e); return null; }
             if (data == null) { err = "the VPN is off"; return null; }
             return Core.AddTorrentBytes(data, q.Save, q.Category, q.Start, out err);
@@ -722,6 +756,8 @@ namespace HallowTorrents
             sb.Append("HTTP/1.1 ").Append(r.Code).Append(' ').Append(ApiHttp.Reason(r.Code)).Append("\r\n");
             sb.Append("Content-Type: ").Append(r.Type).Append("\r\nContent-Length: ").Append(r.Body.Length).Append("\r\n");
             if (r.SetCookie != null) sb.Append("Set-Cookie: ").Append(r.SetCookie).Append("\r\n");
+            foreach (var kv in r.Headers) if (kv.Key.IndexOfAny(new[] { '\r', '\n', ':' }) < 0 && (kv.Value ?? "").IndexOfAny(new[] { '\r', '\n' }) < 0) sb.Append(kv.Key).Append(": ").Append(kv.Value).Append("\r\n");
+            if (!r.Headers.ContainsKey("Content-Security-Policy")) sb.Append("Content-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\n");
             sb.Append("Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: same-origin\r\n");
             sb.Append("Connection: ").Append(keep ? "keep-alive" : "close").Append("\r\n\r\n");
             var h = Encoding.ASCII.GetBytes(sb.ToString());
