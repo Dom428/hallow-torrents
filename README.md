@@ -39,6 +39,11 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## For Hallow Remote and Hub (new in 1.8)
+
+- **`categories`** on the pipe answers your category names only (`ok {"categories":["Movies","TV",...],"count":N}`) - Hallow Remote's add-magnet picker uses it. Never folders or rules.
+- **Searches no longer collide.** `search ... --client <id>` and `search-add <id> --client <id>` keep each caller's result ids apart, so two phones (or a phone and Hub) searching at the same time don't lose each other's results. Without `--client` it works exactly as before (one shared set). The Search page and each web-interface sign-in keep their own results as well. Details in [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md).
+
 ## Plex and Emby too (new in 1.7)
 
 The page is now **Media server / NAS** and starts with a choice: **Jellyfin / Emby / Plex / None (just copy)**. If you used 1.6, nothing changes - your settings carry on as Jellyfin.
@@ -208,6 +213,7 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
   - `list`, `stats`, `pause <hash>`, `resume <hash>` (1.4) - for Hallow Remote and scripts: the list as JSON (name, progress, speeds, state, VPN-locked flag...), statistics, pause / resume one torrent; `add ... --direct` adds without the Add window. All shapes: [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md)
   - `speedtest [ubuntu|<magnet>|<path.torrent>|status|stop]`, `leak-drill [status|--wait]`, `watchdog [resume]` (1.5) - see [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md); never an address
   - `nas-status` (1.6) - the Send-to-NAS queue as counts; 1.7 adds `server` (`jellyfin` / `emby` / `plex` / `none`)
+  - `categories` (1.8) - your category names only; `search` / `search-add` take `--client <id>` (1.8) so each caller keeps its own result ids
   - `open [transfers|search|rss|stats|apps|nas|proof|settings]` (`jellyfin`, `emby`, `plex` open the Media server / NAS page too)
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
 - `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`; 1.7 adds `server` inside it), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
@@ -224,5 +230,7 @@ The 1.5 tests (`TorrentsTests.exe unit15`, `proof`, `race`, `benchsmoke`, `app15
 The 1.6 tests (`TorrentsTests.exe unit16`, `nas`, `app16`) use a temp folder as the NAS and a local Jellyfin stand-in: the private-address rules (a public address, a name resolving to one, a mapped drive to one - refused), Jellyfin names, copy and verify, resume after an interrupted copy (and a bad partial file thrown away), never overwriting a different file, offline waiting with back-off, the three category rules, flagged / Defender / still-scanning downloads never sent, the debounced refresh with the key in the header only, the key never in nas.json in plain text or in the log / status / pipe.
 
 The 1.7 tests (`TorrentsTests.exe unit17`, `servers`, `app17`) use local Emby and Plex stand-ins on 127.0.0.1: server info (Emby's `/emby/System/Info/Public`, also when it wants the key; Plex's `/identity` without the token), Plex's library list, the debounced refresh calls (Emby `/Library/Media/Updated`; Plex one partial scan per new folder in the right library at Plex's own path), refused keys / tokens, a removed library, the token only in a header and never in nas.json in plain text, the log, a URL, status or the pipe, Plex's naming, public addresses refused, None (just copy), and 1.6 settings coming up as Jellyfin in a test copy. The only contact with the real NAS was a read-only `GET /identity` (Plex - not answering yet) and `GET /System/Info/Public` (Jellyfin).
+
+The 1.8 tests (`TorrentsTests.exe unit18`, `app18`) check `categories` (names only, never folders) and per-client search ids against the windowed test copy and the headless exe with a local Torznab stand-in: two clients' searches keep their own ids, one client can't add another's result, the shared set without `--client` still works as in 1.3, bad `--client` names are refused, and the oldest of more than 32 clients is dropped.
 
 Pictures use made-up torrents.

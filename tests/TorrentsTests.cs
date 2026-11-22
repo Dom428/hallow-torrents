@@ -66,6 +66,10 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "servers") { Emby17(); Plex17(); }
                 if (only == null || only == "app17") AppCopy17();
                 if (only == "real17") Real17();
+                // 1.8: for Hallow Remote 1.18 / Hub 2.17 - categories, search ids per client
+                if (only == null || only == "unit" || only == "unit18") V18Unit();
+                if (only == null || only == "scope18") Scope18();
+                if (only == null || only == "app18") AppCopy18();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

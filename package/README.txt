@@ -28,6 +28,12 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.8
+- For Hallow Remote and Hallow Hub: a new pipe command "categories" lists your category names (for the
+  phone's add-magnet picker), and searches can say who asked ("--client <id>") so two phones searching
+  at once no longer lose each other's results. The Search page and each web-interface sign-in keep their
+  own results too. Nothing else changes; the VPN lock is untouched.
+
 WHAT'S NEW IN 1.7
 - Plex and Emby too: the page is now "Media server / NAS" with a choice of Jellyfin, Emby, Plex or None
   (just copy). 1.6 settings carry on as Jellyfin. Emby: same names as Jellyfin, its address and an API

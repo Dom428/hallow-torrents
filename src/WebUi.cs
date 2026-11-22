@@ -134,8 +134,8 @@ namespace HallowTorrents
                         var cat = (r.Arg("category") ?? "").Trim(); if (cat.Length > 0 && S.Cat(cat) == null) return Err(400, "No category called " + cat + ".");
                         Core.SetCategory(x.Id, cat.Length == 0 ? "" : S.Cat(cat).Name); return Done();
                     }
-                case "search": return Search(r);
-                case "search-add": return SearchAdd(r);
+                case "search": return Search(r, WebClient(sid));          // 1.8: each signed-in browser keeps its own result ids
+                case "search-add": return SearchAdd(r, WebClient(sid));
                 case "connect-vpn": { string e; try { e = ConnectVpn(); } catch (Exception ex) { e = ex.Message; } return e == null ? Done() : Err(502, e); }
             }
             return Err(404, "Not Found");
@@ -168,20 +168,25 @@ namespace HallowTorrents
             return Done(new Dictionary<string, object> { { "hash", e.Id }, { "name", e.Name }, { "category", e.Category }, { "vpnLocked", !Core.EngineUp } });
         }
 
-        ApiResponse Search(ApiRequest r)
+        // 1.8: a browser session's own search ids (a hash of the session, never the session itself)
+        static string WebClient(string sid)
+        {
+            using (var h = System.Security.Cryptography.SHA256.Create()) return "web-" + BitConverter.ToString(h.ComputeHash(System.Text.Encoding.UTF8.GetBytes(sid ?? ""))).Replace("-", "").Substring(0, 16).ToLowerInvariant();
+        }
+        ApiResponse Search(ApiRequest r, string client)
         {
             var se = api.Search; if (se == null) return Err(503, "Search isn't available.");
             var text = (r.Arg("q") ?? "").Trim(); var cat = (r.Arg("cat") ?? "").Trim().ToLowerInvariant(); int n; if (!int.TryParse(r.Arg("n"), out n)) n = 50; n = Math.Max(1, Math.Min(100, n));
             if (text.Length == 0) return Err(400, "Type what to look for.");
             if (cat.Length > 0 && Torznab.CatParam(cat) == null) return Err(400, "No search category called " + cat + ".");
-            var o = se.Run(SearchQuery.From(text, cat), DateTime.UtcNow).Result;
+            var o = se.Run(SearchQuery.From(text, cat), DateTime.UtcNow, client).Result;
             var d = SearchEngine.Json(o, n); d["error"] = o.Error; d["ok"] = o.Error == null;
             return J(d);
         }
-        ApiResponse SearchAdd(ApiRequest r)
+        ApiResponse SearchAdd(ApiRequest r, string client)
         {
             var se = api.Search; if (se == null) return Err(503, "Search isn't available.");
-            var res = se.ByToken((r.Arg("id") ?? "").Trim()); if (res == null) return Err(404, "That result is gone - search again.");
+            var res = se.ByToken((r.Arg("id") ?? "").Trim(), client); if (res == null) return Err(404, "That result is gone - search again.");
             var cat = (r.Arg("category") ?? "").Trim(); if (cat.Length > 0 && S.Cat(cat) == null) return Err(400, "No category called " + cat + ".");
             string err; var e = se.Download(res, cat.Length > 0 ? S.Cat(cat).Name : (S.Cat(res.Category) != null ? S.Cat(res.Category).Name : null), null, true, out err);
             if (e == null) return Err(400, err ?? "It couldn't be added.");

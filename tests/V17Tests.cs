@@ -211,7 +211,7 @@ namespace HallowTorrents.Tests
             try
             {
                 string r = null; for (int i = 0; i < 40 && (r == null || !r.StartsWith("ok")); i++) { Thread.Sleep(250); r = Cmd(exe, dir, "ping"); }
-                Ok(r != null && r.Contains("\"version\":\"" + Program.Version + "\"") && Program.Version == "1.7", "test copy: ping " + r);
+                Ok(r != null && r.Contains("\"version\":\"" + Program.Version + "\"") && new Version(Program.Version) >= new Version("1.7"), "test copy: ping " + r);
                 r = Cmd(exe, dir, "nas-status");
                 Ok(r.StartsWith("ok {") && r.Contains("\"server\":\"jellyfin\"") && r.Contains("\"serverAddress\":true") && r.Contains("\"serverKey\":false") && !r.Contains("192.168") && !r.Contains("share"), "pipe nas-status from 1.6 settings: server jellyfin (migrated), no address: " + r);
                 Ok(Cmd(exe, dir, "open plex") == "ok" && Cmd(exe, dir, "open emby") == "ok", "open plex / open emby (the Media server / NAS page)");

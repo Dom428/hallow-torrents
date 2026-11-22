@@ -324,17 +324,19 @@ namespace HallowTorrents
         }
         string PipeSearch(string arg)
         {
+            string cerr; var client = RemoteApi.TakeClient(ref arg, out cerr); if (cerr != null) return "error " + cerr;   // 1.8
             int n; string cat; var text = SplitSearch(" " + arg, out n, out cat)[0];
-            if (text.Length == 0) return "error search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]";
+            if (text.Length == 0) return "error search <words> [--n 10] [--cat movies|tv|music|games|software|books|other] [--client <id>]";
             if (cat.Length > 0 && Torznab.CatParam(cat) == null) return "error no search category called " + cat;
-            var o = Search.Run(SearchQuery.From(text, cat), DateTime.UtcNow).Result;
+            var o = Search.Run(SearchQuery.From(text, cat), DateTime.UtcNow, client).Result;
             if (o.Locked) return "error waiting for the VPN - searches only go out over it (nothing was sent)";
             if (o.Error != null) return "error " + o.Error;
-            return "ok " + Family.Json(SearchEngine.Json(o, n));
+            var d = SearchEngine.Json(o, n); d["client"] = client; return "ok " + Family.Json(d);
         }
         string PipeSearchAdd(string arg)
         {
-            var p = SplitAdd(arg); var r = Search.ByToken(p[0]);
+            string cerr; var client = RemoteApi.TakeClient(ref arg, out cerr); if (cerr != null) return "error " + cerr;   // 1.8
+            var p = SplitAdd(arg); var r = Search.ByToken(p[0], client);
             if (r == null) return "error no search result called " + p[0] + " (search again)";
             byte[] t; string m; var err = Search.Fetch(r, out t, out m);
             if (err != null) return "error " + err;
@@ -576,6 +578,7 @@ namespace HallowTorrents
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
                 case "search": return PipeSearch(arg);
                 case "search-add": return PipeSearchAdd(arg);
+                case "categories": return OnUi(() => RemoteApi.Categories(S.Categories.ToList()));   // 1.8
                 case "open": return OnUi(() => { var p = arg.Length > 0 ? MainWindow.PageId(arg) : null; if (arg.Length > 0 && p == null) return "error no page called " + arg; ShowMain(p); return "ok"; });
                 case "menu": return OnUi(() => "ok " + Family.Json(new Dictionary<string, object> { { "app", "Torrents" }, { "items", MenuItems() } }));
                 case "invoke": return OnUi(() => Invoke(arg));

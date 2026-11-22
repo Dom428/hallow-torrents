@@ -26,7 +26,7 @@ Torrents only ever run over the VPN. A torrent added or resumed from a phone **w
 | `pause <hash>` / `resume <hash>` | `ok {"hash":"<full hash>","paused":true,"vpnLocked":false}`. `<hash>` = the info hash from `list`, or a unique start of it (8+ hex characters). Errors: `error no torrent with that hash`, `error give the torrent's info hash (from list)`, `error more than one torrent starts with that - give more of the hash` |
 | `pause-all` / `resume-all` | `ok` |
 | `search <words> [--n 10] [--cat movies\|tv\|music\|games\|software\|books\|other]` | `ok {search}` - see below. `show s01e02` searches that episode, `tt0111161` a movie by IMDb id. Can take up to ~20 s (each indexer has a 15 s timeout): use a 45 s pipe timeout. `error waiting for the VPN - searches only go out over it (nothing was sent)` while locked and no local indexer manager is set up. |
-| `search-add <id> [--category <name>]` | the same answer as `add`. `<id>` comes from the last `search` (ids live until the next search). |
+| `search-add <id> [--category <name>]` | the same answer as `add`. `<id>` comes from the last `search` (ids live until the next search). **1.8:** add `--client <id>` to both `search` and `search-add` so other callers can't replace your ids - see "Categories and per-client search ids (1.8)" below. |
 | `menu` / `invoke <id>` | Hallow Hub's generic tray menu (`pause-all`, `resume-all`, `add-magnet`, `connect-vpn`, `settings`) |
 | `open [transfers\|search\|rss\|stats\|apps\|settings]` | opens the window on the PC (`error` on the headless copy) - not for phones |
 
@@ -140,3 +140,23 @@ status.json (1.5) adds `perf` (`balanced` / `max` / `light` / `gaming`), `watchd
 ## Send to Jellyfin (1.6)
 
 `nas-status` -> `ok {"on":true,"destination":true,"queued":0,"copying":1,"waiting":0,"failed":0,"done":12,"jellyfin":true,"jellyfinKey":true,"refreshes":3,"lastRefresh":"..."}` - counts only (never file names, the NAS folder or the key). status.json has the same block as `nas`.
+
+## Categories and per-client search ids (1.8)
+
+Check `ping`'s `version` >= 1.8 first (older copies answer `error unknown command` to `categories`, and would treat `--client x` as search words - so don't send it to them).
+
+### `categories`
+
+`categories` -> `ok {"categories":["Movies","TV","Music","Software","Other"],"count":5}` - your category names only, in the order of Settings > Categories (never their folders, rules or library paths). Use them for the add-magnet picker and pass one back as `add <magnet> --direct --category <name>`. Same answer from the windowed app and the headless copy.
+
+### `--client <id>` on `search` and `search-add`
+
+Before 1.8 every caller shared one set of result ids: a search from a second phone (or Hub, or the PC's Search page) replaced the first phone's ids, and its `search-add r3` then failed with `error no search result called r3`. From 1.8:
+
+- `search <words> [--n 10] [--cat ...] --client <id>` keeps this search's ids in that client's own set. `<id>` is 1-64 of `A-Z a-z 0-9 . _ : -` and is yours to choose - Hallow Remote should use one per phone / browser session (e.g. `remote:<session>`), Hub `hub`. A bad one: `error --client needs a name: 1-64 letters, digits, . _ : or -`.
+- `search-add <rN> [--category <name>] --client <id>` only finds ids from **that client's** last search; another client's id answers `error no search result called rN (search again)`.
+- A client's next search replaces only its own ids. Up to 32 clients are remembered; past that the one that searched / added least recently is forgotten (its `search-add` then asks to search again).
+- The search answer gains `"client":"<id>"` (`null` without `--client`). Everything else in the answer is unchanged; ids are still `r<number>` and are never reused while the app runs.
+- **Without `--client` nothing changes**: those callers share the default set, exactly as 1.3 - 1.7 (so an older Remote still works, with the old collision between such callers).
+- The PC's own Search page and each signed-in web-interface session now have their own sets too, so they no longer wipe a phone's results (and a phone's search no longer touches theirs).
+- `--client` can come anywhere after the words; it's never sent to an indexer.

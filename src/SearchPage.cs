@@ -107,7 +107,7 @@ namespace HallowTorrents
             searching = true; Say(c.Locked ? "Searching your local indexer managers (the VPN is off - nothing else is asked)..." : "Searching your indexers..."); selTok = null;
             statusStrip.Children.Clear(); statusStrip.Children.Add(Ui.Muted("Searching...", 12));
             var q = SearchQuery.From(text, sCat);
-            Task.Run(() => c.Search.Run(q, DateTime.UtcNow)).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
+            Task.Run(() => c.Search.Run(q, DateTime.UtcNow, "window")).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
             {
                 searching = false;
                 if (t.IsFaulted) { Say("Search failed: " + t.Exception.GetBaseException().Message); return; }

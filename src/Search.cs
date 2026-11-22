@@ -489,6 +489,27 @@ namespace HallowTorrents
         public SearchOutcome Last;
         readonly Dictionary<string, SearchResult> tokens = new Dictionary<string, SearchResult>();
         int counter;
+        // 1.8: result ids per caller. Each caller ("client" - a phone behind Hallow Remote, a Hub, the web interface's session, the
+        // window) keeps the ids of its own last search, so one caller's search no longer throws away another's. Callers that don't
+        // say who they are share the default set (tokens above), exactly as before. Ids stay "r<number>" and are never reused.
+        readonly Dictionary<string, Dictionary<string, SearchResult>> scopes = new Dictionary<string, Dictionary<string, SearchResult>>(StringComparer.Ordinal);
+        readonly Dictionary<string, long> scopeUsed = new Dictionary<string, long>(StringComparer.Ordinal);
+        long scopeClock;
+        public const int MaxClients = 32;
+        public static bool ValidClient(string client) { return client != null && Regex.IsMatch(client, @"^[A-Za-z0-9._:\-]{1,64}$"); }
+        public int ClientCount { get { lock (tokens) return scopes.Count; } }
+        Dictionary<string, SearchResult> Scope(string client, bool create)
+        {
+            if (string.IsNullOrEmpty(client)) return tokens;
+            Dictionary<string, SearchResult> m;
+            if (!scopes.TryGetValue(client, out m) && create)
+            {
+                if (scopes.Count >= MaxClients) { var oldest = scopeUsed.OrderBy(x => x.Value).First().Key; scopes.Remove(oldest); scopeUsed.Remove(oldest); }
+                m = new Dictionary<string, SearchResult>(); scopes[client] = m;
+            }
+            if (m != null) scopeUsed[client] = ++scopeClock;
+            return m;
+        }
 
         public SearchEngine(Core core, Rss rss, string dir)
         {
@@ -601,7 +622,9 @@ namespace HallowTorrents
         }
 
         // ---- searching: every enabled indexer at once, each with its own timeout; nothing at all while the VPN is off
-        public async Task<SearchOutcome> Run(SearchQuery q, DateTime nowUtc)
+        public Task<SearchOutcome> Run(SearchQuery q, DateTime nowUtc) { return Run(q, nowUtc, null); }
+        // client (1.8): whose search this is - its result ids replace only that client's earlier ones (null = the shared default set)
+        public async Task<SearchOutcome> Run(SearchQuery q, DateTime nowUtc, string client)
         {
             var o = new SearchOutcome { Query = q }; var sw = Stopwatch.StartNew();
             if (string.IsNullOrWhiteSpace(q.Text) && q.ImdbId == null && q.TmdbId == null) { o.Error = "Type what to look for."; return o; }
@@ -643,7 +666,7 @@ namespace HallowTorrents
             var p = Data.Profile;
             var ranked = Ranker.Rank(results, p, id => { var f = feeds.FirstOrDefault(x => x.Id == id); return f == null ? 0.8 : f.Reliability; }, nowUtc);
             o.Results = ranked.Where(r => p.MinSeeders <= 0 || r.Seeders < 0 || r.Seeders >= p.MinSeeders || r.Flagged).ToList();
-            lock (tokens) { tokens.Clear(); foreach (var r in o.Results) { r.Token = "r" + (++counter); tokens[r.Token] = r; } }
+            lock (tokens) { var set = Scope(client, true); set.Clear(); foreach (var r in o.Results) { r.Token = "r" + (++counter); set[r.Token] = r; } }
             if (p.Inspect) await InspectTop(o, 8, nowUtc).ConfigureAwait(false);
             Save();
             o.Ms = sw.ElapsedMilliseconds; Last = o;
@@ -671,7 +694,9 @@ namespace HallowTorrents
             }
         }
         void Track(TzFeed f, bool ok, double ms) { lock (Lock) { if (ok) f.Ok++; else f.Fail++; if (f.Ok + f.Fail > 200) { f.Ok = f.Ok * 100 / 200; f.Fail = f.Fail * 100 / 200; } f.AvgMs = f.AvgMs <= 0 ? ms : f.AvgMs * 0.7 + ms * 0.3; } }
-        public SearchResult ByToken(string token) { lock (tokens) { SearchResult r; return token != null && tokens.TryGetValue(token, out r) ? r : null; } }
+        public SearchResult ByToken(string token) { return ByToken(token, null); }
+        // 1.8: only the ids of that client's own last search (null = the shared default set, as before)
+        public SearchResult ByToken(string token, string client) { lock (tokens) { SearchResult r; var set = Scope(client, false); return token != null && set != null && set.TryGetValue(token, out r) ? r : null; } }
 
         // ---- a result's .torrent (over the VPN): the magnet link it redirects to, or the file
         public string Fetch(SearchResult r, out byte[] torrent, out string magnet)

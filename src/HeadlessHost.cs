@@ -211,17 +211,20 @@ namespace HallowTorrents
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
                 case "search":
                     {
+                        string cerr; var client = RemoteApi.TakeClient(ref arg, out cerr); if (cerr != null) return "error " + cerr;   // 1.8
                         int n; string cat; var text = SplitSearch(" " + arg, out n, out cat);
-                        if (text.Length == 0) return "error search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]";
+                        if (text.Length == 0) return "error search <words> [--n 10] [--cat movies|tv|music|games|software|books|other] [--client <id>]";
                         if (cat.Length > 0 && Torznab.CatParam(cat) == null) return "error no search category called " + cat;
-                        var o = Search.Run(SearchQuery.From(text, cat), DateTime.UtcNow).Result;
+                        var o = Search.Run(SearchQuery.From(text, cat), DateTime.UtcNow, client).Result;
                         if (o.Locked) return "error waiting for the VPN - searches only go out over it (nothing was sent)";
                         if (o.Error != null) return "error " + o.Error;
-                        return "ok " + Family.Json(SearchEngine.Json(o, n));
+                        var sd = SearchEngine.Json(o, n); sd["client"] = client; return "ok " + Family.Json(sd);
                     }
+                case "categories": return RemoteApi.Categories(S.Categories.ToList());   // 1.8
                 case "search-add":
                     {
-                        var p = SplitAdd(arg); var r = Search.ByToken(p[0]);
+                        string cerr; var client = RemoteApi.TakeClient(ref arg, out cerr); if (cerr != null) return "error " + cerr;   // 1.8
+                        var p = SplitAdd(arg); var r = Search.ByToken(p[0], client);
                         if (r == null) return "error no search result called " + p[0] + " (search again)";
                         string cat = null; if (p[1] != null) { var c = S.Cat(p[1]); if (c == null) return "error no category called " + p[1]; cat = c.Name; } else if (S.Cat(r.Category) != null) cat = S.Cat(r.Category).Name;
                         string err; var e = Search.Download(r, cat, null, true, out err);

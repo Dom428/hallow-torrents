@@ -95,6 +95,24 @@ namespace HallowTorrents
             }
             return null;
         }
+        // 1.8: "categories" - your category names only (never their folders or rules), in Settings order, for a phone's add-magnet picker
+        public static string Categories(IEnumerable<Category> cats)
+        {
+            var names = (cats ?? Enumerable.Empty<Category>()).Where(c => c != null && !string.IsNullOrWhiteSpace(c.Name)).Select(c => c.Name).ToList();
+            return "ok " + Family.Json(new Dictionary<string, object> { { "categories", names }, { "count", names.Count } });
+        }
+        // 1.8: "search ... --client <id>" / "search-add <id> --client <id>": whose search it is (a phone, a Hub...). Takes it out of arg;
+        // null when not given (the shared default set, as before). error is set when it's there but not 1-64 of A-Z a-z 0-9 . _ : -
+        public static string TakeClient(ref string arg, out string error)
+        {
+            error = null;
+            var m = System.Text.RegularExpressions.Regex.Match(" " + arg + " ", @"\s--client(?:\s+(\S*))?(?=\s)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) return null;
+            var c = m.Groups[1].Success ? m.Groups[1].Value.Trim('"') : "";
+            arg = (" " + arg + " ").Remove(m.Index, m.Length).Trim();
+            if (!SearchEngine.ValidClient(c)) { error = "--client needs a name: 1-64 letters, digits, . _ : or -"; return null; }
+            return c;
+        }
         // "add <magnet> [--category <c>] [--direct]": --direct adds straight away (no Add window on the PC - what a phone wants)
         public static bool TakeDirect(ref string arg)
         {
