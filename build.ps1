@@ -26,7 +26,7 @@ $files = Get-ChildItem $src -Filter *.cs | ForEach-Object FullName
 & "$fw\csc.exe" @($common + @('/target:winexe', "/out:$out") + $files)
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 # headless: every source file that doesn't need a window (the list below is the window side), plus headless\Program.cs
-$windowFiles = 'App.cs', 'ApiPage.cs', 'Accent.cs', 'Dialogs.cs', 'Dialogs11.cs', 'Icons.cs', 'Icons.g.cs', 'MainWindow.cs', 'MainWindow11.cs', 'MainWindow15.cs', 'Mode.cs', 'SearchPage.cs', 'SettingsPage.cs', 'Snap.cs', 'SnapShots.cs', 'Ui.cs', 'Updater.cs'
+$windowFiles = 'App.cs', 'ApiPage.cs', 'Accent.cs', 'Dialogs.cs', 'Dialogs11.cs', 'Icons.cs', 'Icons.g.cs', 'MainWindow.cs', 'MainWindow11.cs', 'MainWindow15.cs', 'MainWindow16.cs', 'Mode.cs', 'SearchPage.cs', 'SettingsPage.cs', 'Snap.cs', 'SnapShots.cs', 'Ui.cs', 'Updater.cs'
 $hFiles = @(Get-ChildItem $src -Filter *.cs | Where-Object { $windowFiles -notcontains $_.Name } | ForEach-Object FullName) + (Join-Path $PSScriptRoot 'headless\Program.cs')
 & "$fw\csc.exe" @(@('/nologo', '/optimize+', '/nowarn:1685', '/target:winexe', "/out:$outH", "/win32icon:$src\hallow.ico") + $web + (($coreRefs + $libRefs) | ForEach-Object { "/reference:$_" }) + $hFiles)
 if ($LASTEXITCODE -ne 0) { throw "Headless build failed" }

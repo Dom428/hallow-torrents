@@ -136,6 +136,8 @@ namespace HallowTorrents
                 WriteStatus(); var h = Ticked; if (h != null) h();
             }));
             Proof.Start();
+            // v1.6: Send to Jellyfin (finished downloads to the NAS folder, Jellyfin told)
+            Nas = new Nas(Core, () => S, Log); Nas.Start();
             Watch.Start();
             var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) }; tick.Tick += (s, e) => Tick(); tick.Start();
             var gt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) }; gt.Tick += (s, e) => CheckGame(); gt.Start();
@@ -165,6 +167,9 @@ namespace HallowTorrents
 
         // ---------------- v1.5: proof (the socket watchdog, the speed test, the leak drill)
         public Proof Proof;
+        public Nas Nas;   // v1.6
+        public Nas SnapNas;   // --snap: made-up queue
+        public Nas NasNow { get { return SnapMode ? SnapNas : Nas; } }
         // the watchdog's red alert: "Resume" after you checked - the engine is built again on the VPN (if it's up)
         public void ResumeAfterWatchdog()
         {
@@ -262,6 +267,7 @@ namespace HallowTorrents
         {
             try { await Finish.Run(Core, x, S, (t, m) => ui.BeginInvoke(new Action(() => Notify(t, m)))).ConfigureAwait(false); }
             catch (Exception e) { Log("finish: " + e.Message); }
+            try { if (Nas != null) Nas.Consider(x); } catch (Exception e) { Log("nas: " + e.Message); }   // v1.6: after Defender's scan
             ui.BeginInvoke(new Action(() => { var h = Ticked; if (h != null) h(); }));
             if (x.Scan != "threats" && (x.Flags == null || x.Flags.Count == 0)) ui.BeginInvoke(new Action(() => Notify("Download finished", x.Name)));
         }
@@ -383,6 +389,7 @@ namespace HallowTorrents
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
             if (Watch != null) Watch.Dispose();
             if (Proof != null) Proof.Dispose();
+            if (Nas != null) Nas.Dispose();
             if (WebApi != null) try { WebApi.Dispose(); } catch { }
             try { Core.Dispose(); } catch { }
             WriteStatus(false);
@@ -552,6 +559,7 @@ namespace HallowTorrents
             // v1.5: the performance profile in use, and the socket watchdog (whether it stopped torrents - never the socket's address)
             d["perf"] = Core.PerfNow.Name; d["watchdog"] = Proof != null; d["watchdogLocked"] = Core.Tripped != null;
             d["speedTest"] = Proof != null && Proof.Speed.Running; d["leakDrill"] = Proof != null && Proof.Drill.Running; d["repairedPieces"] = Core.Repaired;
+            d["nas"] = Nas == null ? null : Nas.Json();   // v1.6: counts only - never file names, the folder or the key
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -577,6 +585,7 @@ namespace HallowTorrents
             var remote = RemoteApi.Pipe(cmd, arg, Core, Game); if (remote != null) { if (cmd == "pause" || cmd == "resume") WriteStatus(); return remote; }
             // v1.5: speedtest, leak-drill, watchdog
             var proof = Proof == null ? null : Proof.Pipe(cmd, arg, () => ResumeAfterWatchdog()); if (proof != null) { WriteStatus(); return proof; }
+            if (cmd == "nas-status") return Nas == null ? "error not ready" : "ok " + Family.Json(Nas.Json());   // v1.6
             if (TorSettings.TestDir != null && cmd.StartsWith("test-")) return OnUi(() => TestCommand(cmd, arg));
             return "error unknown command";
         }

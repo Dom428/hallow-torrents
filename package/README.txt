@@ -28,6 +28,14 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.6
+- Send to Jellyfin (the new "Jellyfin / NAS" page): finished downloads that passed Defender's scan are
+  copied to a folder on your NAS (\\192.168.4.197\media) with Jellyfin's names, checked (size and
+  checksum) and resumed after interruptions. Per category: copy, move after seeding, or move now (the PC's
+  copy goes to the Recycle Bin). Home network / Tailscale only - never through the VPN, never a public
+  address. No NAS password is stored: map the share once in File Explorer. Optional Jellyfin address and
+  API key (encrypted) so Jellyfin sees new downloads straight away.
+
 WHAT'S NEW IN 1.5
 - Performance profiles (Settings > Performance): Balanced (default) talks to more peers at once and keeps
   a bigger disk cache than 1.4; Max speed goes further; Light is for older or busy PCs. While a game runs

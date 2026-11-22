@@ -39,6 +39,22 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Send to Jellyfin (new in 1.6)
+
+Finished downloads can go straight to the **Jellyfin library on your NAS** - the **Jellyfin / NAS** page.
+
+- **Where:** a folder on your NAS, e.g. `\\192.168.4.197\media` (or a drive letter you mapped to it), with **Movies** and **Shows** subfolders (change or empty them); other categories get a folder of their own name. **Test the folder** checks it's reachable and writable (it writes and deletes a small temp file).
+- **Your own network only, never through the VPN:** the NAS must be at a private address (home network or Tailscale), or a home-network name that resolves only to private addresses - the same rules as 1.4's local indexer exception. A public address is refused. Files are copied by Windows' own SMB client.
+- **No NAS password in Hallow Torrents:** if the share needs a login, map it once in File Explorer (This PC > **Map network drive** > the folder > tick **Reconnect at sign-in** and **Connect using different credentials** > your NAS user > tick **Remember my credentials**). Windows keeps that login and Hallow Torrents goes through Windows.
+- **When:** only after the download is finished, rechecked and **Microsoft Defender's scan has passed**. Flagged downloads and anything Defender found something in are never sent.
+- **Jellyfin names:** `Movies\Title (Year)\Title (Year).mkv`, `Shows\Show\Season 01\Show - S01E02.mkv`, subtitles alongside; samples and .nfo files stay behind.
+- **Safe copies:** each file goes to `<name>.hallow-part` first, carries on where it stopped after an interruption (the bytes already there are checked first), then its **size and SHA-256 are compared** with the download before it's renamed. A different file already on the NAS is never overwritten.
+- **Per category:** **Copy** (and keep seeding from this PC), **Move after seeding** (copied now; when the seeding goal is reached it stops and the PC's copy goes to the Recycle Bin), **Move now** (copied, then seeding stops and the PC's copy goes to the Recycle Bin), or **Don't send**. Torrents Radarr / Sonarr added are only ever copied. Never a permanent delete.
+- **NAS off?** The item waits and is tried again after 30 s, 1, 2, 4... up to 30 minutes; the queue shows progress, *Retry now* and *Open folder*.
+- **Jellyfin (optional):** its address (e.g. `http://192.168.4.197:8096`, private only) shows the server's name and version (`/System/Info/Public`, no key). With an **API key** (Jellyfin: Dashboard > API Keys > +) it's told about new folders straight away (`/Library/Media/Updated`, falling back to a library scan), once for a batch. The key is kept encrypted for your Windows user (DPAPI, nas.json) and never shown or logged.
+- status.json gets a `nas` block and the pipe answers `nas-status` - counts only, never file names, the folder or the key.
+
+![Jellyfin / NAS](docs/nas.png)
 ## Speed and proof (new in 1.5)
 
 **The goal:** never leak, and be as good as NordVPN + qBittorrent. The VPN lock was already strict; 1.5 adds proof that it holds, a watchdog behind it, and faster defaults measured on a benchmark.
@@ -174,9 +190,10 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
   - `search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]` (1.3) - searches your indexers over the VPN and answers the top N as JSON (title, indexer, size, seeders, peers, score, resolution / source / codec / HDR / audio / group, season / episode, category, flags, an `id`); `error waiting for the VPN...` while it's off (nothing is sent). `search-add <id> [--category <name>]` adds a result through the normal add. Never returns API keys.
   - `list`, `stats`, `pause <hash>`, `resume <hash>` (1.4) - for Hallow Remote and scripts: the list as JSON (name, progress, speeds, state, VPN-locked flag...), statistics, pause / resume one torrent; `add ... --direct` adds without the Add window. All shapes: [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md)
   - `speedtest [ubuntu|<magnet>|<path.torrent>|status|stop]`, `leak-drill [status|--wait]`, `watchdog [resume]` (1.5) - see [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md); never an address
-  - `open [transfers|search|rss|stats|apps|proof|settings]`
+  - `nas-status` (1.6) - the Send-to-Jellyfin queue as counts
+  - `open [transfers|search|rss|stats|apps|nas|proof|settings]`
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
-- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
+- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
 
 ## Good to know
 
@@ -186,5 +203,7 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
 - Tests (`build.ps1 -Tests`, `tests\TorrentsTests.exe`) only use a local swarm on this PC: a local tracker, a local seeder, a local web server for RSS and blocklists, and Hallow Torrents bound to a stand-in VPN address (127.0.0.3). The 1.3 search tests (`TorrentsTests.exe search`) use a local Torznab stand-in (playing Prowlarr and Jackett, with fixture results: good releases, CAMs, fakes with an .exe, wrong sizes, a slow and a broken indexer) and check every request comes from the stand-in VPN address - real indexers are never called. The 1.4 tests (`TorrentsTests.exe local`, `web`, `headless`) check the private-address rules (including mixed answers, DNS rebinding to a public address and a redirect to a public host) against a stand-in local and a stand-in public server, the web interface (sign-in, CSRF, CSP, add a magnet / a .torrent, pause / resume, the search proxy) with the local swarm, the headless exe (no window, no WPF loaded, the pipe and the web interface), and the pipe's JSON shapes. The 1.2 contract tests (`TorrentsTests.exe arr`) replay the requests Radarr, Sonarr and Prowlarr send to qBittorrent against the Web API on 127.0.0.1 - no real *arr app is installed.
 
 The 1.5 tests (`TorrentsTests.exe unit15`, `proof`, `race`, `benchsmoke`, `app15`) check the profiles (the 1.4 baseline is exactly MonoTorrent's defaults; a live switch keeps the listener on the VPN address), the watchdog on Windows' real table during a download (no false alarm) and with an injected non-VPN row (locked in under a second, stays locked until resumed), real sockets on 0.0.0.0 / IPv6 / this PC's LAN address being caught, the leak drill against the stand-in VPN (PASS, and FAIL when a non-VPN socket appears during the drop), the speed test on the local swarm and Ubuntu's .torrent from a stand-in (never ubuntu.com), the benchmark at small sizes, `race.ps1` against a local qBittorrent Web API stand-in (bound before the torrent is added, put back afterwards) and the pipe of a test copy.
+
+The 1.6 tests (`TorrentsTests.exe unit16`, `nas`, `app16`) use a temp folder as the NAS and a local Jellyfin stand-in: the private-address rules (a public address, a name resolving to one, a mapped drive to one - refused), Jellyfin names, copy and verify, resume after an interrupted copy (and a bad partial file thrown away), never overwriting a different file, offline waiting with back-off, the three category rules, flagged / Defender / still-scanning downloads never sent, the debounced refresh with the key in the header only, the key never in nas.json in plain text or in the log / status / pipe.
 
 Pictures use made-up torrents.

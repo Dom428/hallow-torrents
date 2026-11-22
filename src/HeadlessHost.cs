@@ -36,7 +36,7 @@ namespace HallowTorrents
 
         public TorSettings S = TorSettings.Load();
         readonly object sl = new object();
-        public Core Core; public Rss Rss; public SearchEngine Search; public VpnWatch Watch; public QbitApi Api; public ApiServer WebApi; public Proof Proof;
+        public Core Core; public Rss Rss; public SearchEngine Search; public VpnWatch Watch; public QbitApi Api; public ApiServer WebApi; public Proof Proof; public Nas Nas;
         public VpnState Vpn = new VpnState { Message = "Checking the VPN..." };
         public string Game, ApiStatus = "Off.";
         readonly ManualResetEvent quit = new ManualResetEvent(false);
@@ -71,6 +71,7 @@ namespace HallowTorrents
             Proof = new Proof(Core, () => S, () => Vpn, () => WebApi != null && WebApi.Running, Log);
             Proof.Alert += reason => WriteStatus();
             Proof.Start();
+            Nas = new Nas(Core, () => S, Log); Nas.Start();   // v1.6: Send to Jellyfin
             Watch.Start();
             Every(1000, Tick);
             Every(3000, CheckGame, 0);
@@ -142,6 +143,7 @@ namespace HallowTorrents
         {
             try { await Finish.Run(Core, x, S, (t, m) => Log("notify: " + t)).ConfigureAwait(false); }
             catch (Exception e) { Log("finish: " + e.Message); }
+            try { if (Nas != null) Nas.Consider(x); } catch (Exception e) { Log("nas: " + e.Message); }   // v1.6
         }
         void KickRss()
         {
@@ -185,6 +187,7 @@ namespace HallowTorrents
             d["webUi"] = WebApi != null && WebApi.Running && S.WebUiOn; d["headless"] = true;
             d["perf"] = Core.PerfNow.Name; d["watchdog"] = Proof != null; d["watchdogLocked"] = Core.Tripped != null;
             d["speedTest"] = Proof != null && Proof.Speed.Running; d["leakDrill"] = Proof != null && Proof.Drill.Running; d["repairedPieces"] = Core.Repaired;
+            d["nas"] = Nas == null ? null : Nas.Json();
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -236,6 +239,7 @@ namespace HallowTorrents
             }
             var remote = RemoteApi.Pipe(cmd, arg, Core, Game); if (remote != null) { if (cmd == "pause" || cmd == "resume") WriteStatus(); return remote; }
             var proof = Proof == null ? null : Proof.Pipe(cmd, arg, () => { Core.ClearTrip(); var v = Vpn; Task.Run(() => { try { Core.SetVpn(v).Wait(10000); } catch { } WriteStatus(); }); }); if (proof != null) { WriteStatus(); return proof; }
+            if (cmd == "nas-status") return Nas == null ? "error not ready" : "ok " + Family.Json(Nas.Json());
             if (TorSettings.TestDir != null && cmd == "test-vpn") return "ok " + Family.Json(new Dictionary<string, object> { { "ok", Vpn.Ok }, { "ip", Vpn.Ip == null ? null : Vpn.Ip.ToString() }, { "engine", Core.EngineUp }, { "message", Vpn.Message } });
             return "error unknown command";
         }
@@ -271,6 +275,7 @@ namespace HallowTorrents
             foreach (var t in timers) try { t.Dispose(); } catch { }
             if (Watch != null) Watch.Dispose();
             if (Proof != null) Proof.Dispose();
+            if (Nas != null) Nas.Dispose();
             if (WebApi != null) try { WebApi.Dispose(); } catch { }
             try { Core.Dispose(); } catch { }
             WriteStatus(false);

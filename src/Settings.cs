@@ -20,6 +20,7 @@ namespace HallowTorrents
         [DataMember] public string LibraryFolder;     // e.g. \\NAS\media\Movies
         [DataMember] public bool Move;                // move (keeps seeding from there) instead of copy
         [DataMember] public string Naming;            // "movie" / "tv" / "keep"
+        [DataMember] public string Nas;               // v1.6 "Send to Jellyfin": "off" / "copy" (keep seeding here) / "after" (move after the seeding goal) / "now" (move now)
         public Category Clone() { return (Category)MemberwiseClone(); }
     }
 
@@ -106,8 +107,14 @@ namespace HallowTorrents
         // ---- v1.5: performance (Perf.cs): a profile and optional Advanced numbers (0 = the profile's). Never touches the VPN lock.
         [DataMember] public string Perf = "balanced";     // "balanced" / "max" / "light"
         [DataMember] public int PerfConnections, PerfPerTorrent, PerfHalfOpen, PerfCacheMB, PerfUploadSlots, PerfOpenFiles;
+        // ---- v1.6: Send to Jellyfin (Nas.cs). The folder on your NAS (\\192.168.4.197\media) - private addresses only. No password is
+        // kept anywhere: Windows uses the credentials it saved when you mapped the share. The Jellyfin API key is in nas.json (DPAPI).
+        [DataMember] public bool NasOn;
+        [DataMember] public string NasFolder;
+        [DataMember] public string NasMovies = "Movies", NasShows = "Shows";
+        [DataMember] public string JellyfinUrl;
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; }
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; NasMovies = "Movies"; NasShows = "Shows"; }
 
         public static TorSettings Load()
         {
@@ -133,7 +140,8 @@ namespace HallowTorrents
                 Categories = new List<Category> {
                     new Category { Name = "Movies", Naming = "movie" }, new Category { Name = "TV", Naming = "tv" },
                     new Category { Name = "Music", Naming = "keep" }, new Category { Name = "Games", Naming = "keep" }, new Category { Name = "Other", Naming = "keep" } };
-            foreach (var c in Categories) if (string.IsNullOrEmpty(c.Naming)) c.Naming = "keep";
+            foreach (var c in Categories) { if (string.IsNullOrEmpty(c.Naming)) c.Naming = "keep"; if (c.Nas != "copy" && c.Nas != "after" && c.Nas != "now") c.Nas = "off"; }
+            if (NasMovies == null) NasMovies = "Movies"; if (NasShows == null) NasShows = "Shows";
             if (Schedule == null) Schedule = new List<ScheduleRule>();
             if (MaxActive < 1) MaxActive = 1; if (MaxActive > 50) MaxActive = 50;
             if (Encryption != "require") Encryption = "prefer";

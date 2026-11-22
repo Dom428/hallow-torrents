@@ -57,6 +57,10 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "race") Race15();
                 if (only == null || only == "benchsmoke") BenchSmoke15();
                 if (only == null || only == "app15") AppCopy15();
+                // 1.6: Send to Jellyfin
+                if (only == null || only == "unit" || only == "unit16") V16Unit();
+                if (only == null || only == "nas") { Nas16(); Copy16(); }
+                if (only == null || only == "app16") AppCopy16();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

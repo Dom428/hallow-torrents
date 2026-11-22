@@ -136,3 +136,7 @@ Check `ping`'s `version` >= 1.5 first. None of these answers carries a peer addr
 | `watchdog resume` | after a watchdog stop: `ok resumed` (torrents start again on the VPN); `ok nothing to resume` |
 
 status.json (1.5) adds `perf` (`balanced` / `max` / `light` / `gaming`), `watchdog` (true), `watchdogLocked`, `speedTest`, `leakDrill` (running or not), `repairedPieces` (pieces the recheck on completion found bad on disk and downloaded again, this session).
+
+## Send to Jellyfin (1.6)
+
+`nas-status` -> `ok {"on":true,"destination":true,"queued":0,"copying":1,"waiting":0,"failed":0,"done":12,"jellyfin":true,"jellyfinKey":true,"refreshes":3,"lastRefresh":"..."}` - counts only (never file names, the NAS folder or the key). status.json has the same block as `nas`.

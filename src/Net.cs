@@ -191,6 +191,18 @@ namespace HallowTorrents
             catch { try { s.Dispose(); } catch { } throw; }
         }
         // the update check (Updater.cs): Windows' resolver and your normal connection, like any app's update check - never torrent traffic
+        // v1.6: the same, connecting only to addresses the caller already checked (Jellyfin on your network - PrivateNet)
+        public static HttpClient DirectHttp(string why, IPAddress[] pinned)
+        {
+            var h = new StandardSocketsHttpHandler { UseProxy = false, Proxy = null, ConnectTimeout = TimeSpan.FromSeconds(10), AllowAutoRedirect = false };
+            h.ConnectCallback = (ctx, token) => Task.Run(() =>
+            {
+                Exception last = null;
+                foreach (var a in pinned) { if (!PrivateNet.IsPrivate(a)) throw new IOException("Not a private address - refused."); try { return (Stream)new NetworkStream(DirectTcp(a, ctx.DnsEndPoint.Port, why, token), true); } catch (Exception e) { last = e; } }
+                throw last ?? new IOException("No address to connect to.");
+            }, token);
+            return new HttpClient(h) { Timeout = TimeSpan.FromSeconds(30) };
+        }
         public static HttpClient DirectHttp(string why)
         {
             var h = new StandardSocketsHttpHandler { UseProxy = false, Proxy = null, ConnectTimeout = TimeSpan.FromSeconds(15), AllowAutoRedirect = true };
