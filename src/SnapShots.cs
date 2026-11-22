@@ -78,6 +78,10 @@ namespace HallowTorrents
             c.S.LegalSeen = true; c.S.HandlerAsked = false; c.Game = null; c.SnapViews = Made(); w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "ask-handler.png"), 1260, 780);
             c.S.HandlerAsked = true;
             w.Show("settings"); Snap.Save(w, Path.Combine(dir, "settings.png"), 1260, 2950);
+            // v1.2: the Radarr / Sonarr page (made-up sign-in and addresses; nothing listens)
+            c.S.ApiOn = true; c.S.ApiUser = "radarr"; c.S.ApiPassHash = "made-up"; c.S.ApiAllow = "192.168.1.20";
+            c.S.Categories.Add(new Category { Name = "radarr", SaveFolder = @"\\NAS\downloads\radarr", Naming = "keep" }); c.S.Categories.Add(new Category { Name = "tv-sonarr", SaveFolder = @"\\NAS\downloads\tv-sonarr", Naming = "keep" });
+            w.Show("apps"); Snap.Save(w, Path.Combine(dir, "apps.png"), 1260, 1060);
             // the dialogs (a made-up .torrent in a temp folder for the Add window)
             var tmp = Path.Combine(Path.GetTempPath(), "HallowTorrentsSnap" + System.Diagnostics.Process.GetCurrentProcess().Id);
             try

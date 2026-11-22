@@ -36,9 +36,10 @@ namespace HallowTorrents.Tests
             var only = args.FirstOrDefault(a => !a.StartsWith("-"));
             try
             {
-                if (only == null || only == "unit") { Names(); Suspicious(); Categories(); Plans(); VpnDecide(); DnsPackets(); HandlerFake(); Defender(); ModeAndContrast(); V11Unit(); }
+                if (only == null || only == "unit") { Names(); Suspicious(); Categories(); Plans(); VpnDecide(); DnsPackets(); HandlerFake(); Defender(); ModeAndContrast(); V11Unit(); V12Unit(); }
                 if (only == null || only == "swarm") Swarm().Wait();
                 if (only == null || only == "swarm11") Swarm11().Wait();
+                if (only == null || only == "arr") Arr12().Wait();
                 if (only == null || only == "app") AppCopy();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }

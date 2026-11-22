@@ -28,6 +28,15 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.2
+- Works with Radarr, Sonarr and Prowlarr: turn on the Web API on the new "Radarr / Sonarr" page, set a
+  username and password, then add a "qBittorrent" download client in the app (host localhost, port 8080,
+  category radarr / tv-sonarr). Off by default; this PC only unless you pick a home-network or Tailscale
+  address; sign-ins expire; 5 wrong passwords lock that address out; never on the internet.
+- Torrents the apps send wait for the VPN like any other and show as queued (not failed) while it's off.
+  Finished downloads stay where they are for the app to import, and seeding stops at the app's goal.
+- Radarr on a NAS? See "Use with Radarr/Sonarr/Prowlarr" in README.md (remote path mapping).
+
 WHAT'S NEW IN 1.1
 - RSS auto-download: feeds checked over the VPN only, rules (words or regular expressions, category,
   folder, prefer 1080p, avoid CAM / TS), episode tracking so nothing is grabbed twice, optional upgrades.

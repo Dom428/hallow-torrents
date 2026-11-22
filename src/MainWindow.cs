@@ -21,10 +21,10 @@ namespace HallowTorrents
         readonly Dictionary<string, Button> nav = new Dictionary<string, Button>();
         Border content; TextBlock sayText, meter; Button updateBtn; DispatcherTimer sayTimer;
         public bool Exiting;
-        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "settings", "Settings", "gear" } };
+        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "apps", "Radarr / Sonarr", "share-from-square" }, new[] { "settings", "Settings", "gear" } };
         public static string PageId(string s)
         {
-            var v = (s ?? "").Trim().ToLowerInvariant(); if (v == "list" || v == "torrents") v = "transfers";
+            var v = (s ?? "").Trim().ToLowerInvariant(); if (v == "list" || v == "torrents") v = "transfers"; if (v == "webapi" || v == "radarr" || v == "sonarr" || v == "prowlarr" || v == "arr") v = "apps";
             return Pages.Any(p => p[0] == v) ? v : null;
         }
 
@@ -98,7 +98,7 @@ namespace HallowTorrents
             page = PageId(id) ?? "transfers";
             foreach (var kv in nav) kv.Value.Tag = kv.Key == page ? "on" : null;
             listPanel = null; statsBox = null; rssBox = null;
-            content.Child = page == "settings" ? SettingsPage() : page == "rss" ? RssPage() : page == "stats" ? StatsPage() : TransfersPage();
+            content.Child = page == "settings" ? SettingsPage() : page == "apps" ? ApiPage() : page == "rss" ? RssPage() : page == "stats" ? StatsPage() : TransfersPage();
             Refresh();
         }
         public void Refresh()

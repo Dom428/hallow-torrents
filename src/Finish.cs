@@ -32,6 +32,8 @@ namespace HallowTorrents
         {
             var c = s.Cat(x.Category);
             if (c == null || !c.Handoff || string.IsNullOrWhiteSpace(c.LibraryFolder)) return;
+            // v1.2: Radarr / Sonarr import it themselves from where it is - moving it away first would break their import
+            if (x.Api && c.Move) { x.Handoff = "Left in place: the app that added it (Radarr / Sonarr) imports it from here."; return; }
             if (x.Flags != null && x.Flags.Count > 0) { x.Handoff = "Held: it has files that look suspicious - check it, then use Send to library."; return; }
             if (x.Scan == "threats") { x.Handoff = "Held: Microsoft Defender found something in it."; return; }
             x.Handoff = await Send(core, x, c).ConfigureAwait(false);

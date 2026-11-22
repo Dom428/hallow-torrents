@@ -24,14 +24,14 @@ using WF = System.Windows.Forms;
 [assembly: AssemblyTitle("Hallow Torrents")]
 [assembly: AssemblyProduct("Hallow Torrents")]
 [assembly: AssemblyDescription("A game-aware torrent client that only runs over your VPN")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 namespace HallowTorrents
 {
     public static class Program
     {
-        public const string Version = "1.1";
+        public const string Version = "1.2";
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr v);
 
         [STAThread]
@@ -167,6 +167,9 @@ namespace HallowTorrents
             Watch = new VpnWatch(() => S, nets, !TorSettings.Fake);
             Watch.Changed += (o, n) => VpnChanged(n);
             Family.Serve("Torrents", Command);
+            // v1.2: the qBittorrent-compatible Web API (off unless you turned it on, with a username and password)
+            Api = new QbitApi(Core, () => S, a => RunOnUi(() => { a(); S.Fix(); S.Save(); }));
+            Api.Log += Log; WebApi = new ApiServer(Api); ApplyApi();
             Watch.Start();
             var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) }; tick.Tick += (s, e) => Tick(); tick.Start();
             var gt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) }; gt.Tick += (s, e) => CheckGame(); gt.Start();
@@ -192,6 +195,23 @@ namespace HallowTorrents
             if (!trayOnly && !TorSettings.Headless) ShowMain(null);
         }
         void Log(string s) { lock (log) { log.Add(DateTime.Now.ToString("HH:mm:ss") + " " + s); if (log.Count > 120) log.RemoveAt(0); } }
+        void RunOnUi(Action a) { if (ui.CheckAccess()) a(); else ui.Invoke(a, TimeSpan.FromSeconds(5)); }
+
+        // ---------------- v1.2: the Web API for Radarr / Sonarr / Prowlarr
+        public QbitApi Api; public ApiServer WebApi;
+        public string ApiStatus = "Off.";   // what Settings shows
+        public bool ApiRunning { get { return SnapMode ? S.ApiOn : WebApi != null && WebApi.Running; } }
+        public string ApplyApi()
+        {
+            if (SnapMode || WebApi == null) return null;
+            WebApi.Stop();
+            string err = null;
+            if (!S.ApiOn) ApiStatus = "Off.";
+            else if (string.IsNullOrWhiteSpace(S.ApiUser) || string.IsNullOrEmpty(S.ApiPassHash)) { err = "Set a username and password first - it stays off without them."; ApiStatus = err; }
+            else { err = WebApi.Start(S.ApiBind, S.ApiPort); ApiStatus = err == null ? "Running on http://" + S.ApiBind + ":" + S.ApiPort + " - sign-in required." : "Not running: " + err; }
+            Log("webapi: " + ApiStatus); WriteStatus();
+            return err;
+        }
 
         // ---------------- the VPN (on the watch thread: the engine is stopped right here, not on the UI thread)
         void VpnChanged(VpnState n)
@@ -355,6 +375,7 @@ namespace HallowTorrents
             Log("quit");
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
             if (Watch != null) Watch.Dispose();
+            if (WebApi != null) try { WebApi.Dispose(); } catch { }
             try { Core.Dispose(); } catch { }
             WriteStatus(false);
             if (main != null) main.Exiting = true;
@@ -514,6 +535,8 @@ namespace HallowTorrents
             // v1.1 (counts only)
             d["rssFeeds"] = Rss == null ? 0 : Rss.Data.Feeds.Count; d["rssRules"] = Rss == null ? 0 : Rss.Data.Rules.Count(r => r.Enabled);
             d["blocklistRanges"] = Core.BlocklistRanges;
+            // v1.2: whether the Web API is on (never its address, username or anything about who's signed in)
+            d["webApi"] = ApiRunning;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }

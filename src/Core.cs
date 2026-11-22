@@ -44,6 +44,12 @@ namespace HallowTorrents
         [DataMember] public List<string> Paths;
         [DataMember] public List<string> Trackers; // v1.1: the tracker list you edited (null = the torrent's own)
         [DataMember] public bool Created;          // v1.1: made here with the torrent creator (seeded straight away, never "finished")
+        // v1.2: added through the Web API (Radarr / Sonarr / Prowlarr): its files stay where they are for the app to import
+        [DataMember] public bool Api;
+        [DataMember] public string Tags;           // v1.2: qBittorrent-style tags, "a,b"
+        // v1.2: share limits set through the Web API (qBittorrent's setShareLimits): null = the category / global limit, -1 = none
+        [DataMember] public double? ShareRatio;
+        [DataMember] public int? ShareMinutes;
         public List<TFile> FileList { get { return (Files ?? new List<string>()).Select(f => { var i = f.LastIndexOf('|'); long l; return new TFile(f.Substring(0, i), long.TryParse(f.Substring(i + 1), out l) ? l : 0); }).ToList(); } }
         public int PrioOf(int i) { return Prio != null && i < Prio.Count ? Prio[i] : 2; }
     }
@@ -62,7 +68,8 @@ namespace HallowTorrents
     // the queue and limits as a pure function (tested): which torrents should be running right now
     public static class Plan
     {
-        public class Item { public string Id; public int Queue; public bool UserPaused, Complete, LimitHit, NoLimit; public double Ratio, SeedMinutes, RatioGoal; }
+        // RatioCap / SeedCap (v1.2, the Web API's per-torrent share limits): null = use RatioGoal / the global minutes, negative = no limit
+        public class Item { public string Id; public int Queue; public bool UserPaused, Complete, LimitHit, NoLimit; public double Ratio, SeedMinutes, RatioGoal; public double? RatioCap, SeedCap; }
         public static HashSet<string> Running(IList<Item> items, int maxActive, string hold, double seedMinutesLimit)
         {
             var r = new HashSet<string>();
@@ -75,8 +82,10 @@ namespace HallowTorrents
         {
             if (i.NoLimit) return false;
             if (i.LimitHit) return true;
-            if (i.RatioGoal > 0 && i.Ratio >= i.RatioGoal) return true;
-            if (seedMinutesLimit > 0 && i.SeedMinutes >= seedMinutesLimit) return true;
+            if (i.RatioCap.HasValue) { if (i.RatioCap.Value >= 0 && i.Ratio >= i.RatioCap.Value) return true; }
+            else if (i.RatioGoal > 0 && i.Ratio >= i.RatioGoal) return true;
+            var minutes = i.SeedCap.HasValue ? i.SeedCap.Value : seedMinutesLimit > 0 ? seedMinutesLimit : -1;
+            if (minutes >= 0 && i.SeedMinutes >= minutes) return true;
             return false;
         }
         public static string Eta(long left, long rate)
@@ -141,6 +150,7 @@ namespace HallowTorrents
             }
         }
         public Entry Get(string id) { lock (lk) return Entries.FirstOrDefault(e => e.Id == id); }
+        public List<Entry> All() { lock (lk) return Entries.ToList(); }   // v1.2: a copy for other threads (the Web API)
 
         // ---------------- adding (works while locked: it waits in the list)
         public static string IdOf(InfoHashes h) { return (h.V1 ?? h.V2).ToHex().ToLowerInvariant(); }
@@ -362,7 +372,7 @@ namespace HallowTorrents
         double GoalOf(Entry x) { var c = S.Cat(x.Category); return c != null && c.RatioGoal > 0 ? c.RatioGoal : S.RatioLimit; }
         public HashSet<string> Wanted()
         {
-            List<Plan.Item> items; lock (lk) items = Entries.Select(x => new Plan.Item { Id = x.Id, Queue = x.Queue, UserPaused = x.UserPaused, Complete = x.CompletedAt != null, LimitHit = x.LimitHit, NoLimit = x.NoLimit, Ratio = RatioOf(x), SeedMinutes = x.SeedSecs / 60, RatioGoal = GoalOf(x) }).ToList();
+            List<Plan.Item> items; lock (lk) items = Entries.Select(x => new Plan.Item { Id = x.Id, Queue = x.Queue, UserPaused = x.UserPaused, Complete = x.CompletedAt != null, LimitHit = x.LimitHit, NoLimit = x.NoLimit, Ratio = RatioOf(x), SeedMinutes = x.SeedSecs / 60, RatioGoal = GoalOf(x), RatioCap = x.ShareRatio, SeedCap = x.ShareMinutes }).ToList();
             foreach (var i in items) if (i.Complete && !i.UserPaused && !i.LimitHit && Plan.LimitReached(i, S.SeedMinutes)) { var x = Get(i.Id); if (x != null && !x.NoLimit) { x.LimitHit = true; L("limit reached " + x.Id); } }
             return Plan.Running(items, S.MaxActive, Hold, S.SeedMinutes);
         }
@@ -468,6 +478,16 @@ namespace HallowTorrents
             catch (Exception ex) { L("flags " + ex.Message); }
         }
         public void SetCategory(string id, string cat) { var x = Get(id); if (x == null) return; x.Category = cat; Save(); }
+        // v1.2 (the Web API's setShareLimits): ratio / minutes, -2 = back to the category / global limit, -1 = no limit. Checked again
+        // straight away - a torrent that was stopped at its old limit seeds on if the new one isn't reached.
+        public void SetShareLimits(string id, double ratio, int minutes)
+        {
+            var x = Get(id); if (x == null) return;
+            x.ShareRatio = ratio <= -2 ? (double?)null : ratio < 0 ? -1 : ratio;
+            x.ShareMinutes = minutes <= -2 ? (int?)null : minutes < 0 ? -1 : minutes;
+            x.LimitHit = false; x.NoLimit = false; Save(); Kick();
+        }
+        public double GoalFor(Entry x) { return GoalOf(x); }
         public async Task<string> Recheck(string id)
         {
             var m = M(id); if (m == null) return "Force recheck needs the VPN connected (the engine isn't running).";

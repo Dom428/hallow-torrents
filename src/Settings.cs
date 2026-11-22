@@ -93,7 +93,16 @@ namespace HallowTorrents
         // ---- safety
         [DataMember] public bool ScanDone = true;            // Defender scan when a download completes
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; }
+        // ---- v1.2: the qBittorrent-compatible Web API for Radarr / Sonarr / Prowlarr (WebApi.cs). Off by default, this PC only by default.
+        [DataMember] public bool ApiOn;
+        [DataMember] public int ApiPort = 8080;
+        [DataMember] public string ApiBind = "127.0.0.1";    // 127.0.0.1, or a home-network / Tailscale address you picked - never 0.0.0.0
+        [DataMember] public string ApiUser;
+        [DataMember] public string ApiPassHash;              // a salted PBKDF2 hash (ApiAuth) - never the password itself
+        [DataMember] public string ApiAllow;                 // optional allow-list: "192.168.1.20, 100.64.0.0/10" (empty = any local address)
+        [DataMember] public int ApiSessionMinutes = 60;      // a sign-in expires after this long unused
+
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; }
 
         public static TorSettings Load()
         {
@@ -128,6 +137,9 @@ namespace HallowTorrents
             if (GameKBps < 1) GameKBps = 1;
             if (BlocklistDays < 1) BlocklistDays = 1; if (BlocklistDays > 90) BlocklistDays = 90;
             if (Port < 1024 || Port > 65535) Port = new Random().Next(20000, 60000);
+            if (ApiPort < 1024 || ApiPort > 65535) ApiPort = 8080;
+            System.Net.IPAddress bindIp; if (string.IsNullOrWhiteSpace(ApiBind) || !System.Net.IPAddress.TryParse(ApiBind.Trim(), out bindIp)) ApiBind = "127.0.0.1"; else ApiBind = bindIp.ToString();
+            if (ApiSessionMinutes < 1) ApiSessionMinutes = 60; if (ApiSessionMinutes > 1440) ApiSessionMinutes = 1440;
         }
         public Category Cat(string name)
         {
