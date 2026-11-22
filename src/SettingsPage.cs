@@ -152,6 +152,9 @@ namespace HallowTorrents
             n.Children.Add(Ui.Switch("Local peer discovery (talks to your home network only, outside the VPN - off unless you need it)", S.Lpd, on => { S.Lpd = on; SavedRestart(); }));
             n.Children.Add(Ui.T("Encryption", 12.5, true));
             n.Children.Add(Choice(new[] { new[] { "prefer", "Prefer encrypted connections" }, new[] { "require", "Require encryption (fewer peers)" } }, S.Encryption, id => { S.Encryption = id; SavedRestart(); }));
+            n.Children.Add(Ui.Muted("Prefer (1.5): the handshake is encrypted and full-stream encryption is used when the other side wants it - like qBittorrent's default, with less CPU than 1.4. Everything is inside your VPN's tunnel either way.", 12, 0));
+            // ---- v1.5: performance profiles
+            PerformanceSection(page);
             // ---- the IP blocklist (v1.1: also from a URL, downloaded over the VPN and refreshed every N days)
             var bl = Section(page, "IP blocklist", "Peers in these address ranges are refused. PeerGuardian / P2P or eMule ipfilter.dat format - plain, .gz or .zip. A list from an address is downloaded over the VPN only.");
             TextBlock blNote = null;

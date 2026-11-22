@@ -133,19 +133,9 @@ namespace HallowTorrents
                 foreach (var a in pinned)
                 {
                     if (!PrivateNet.IsPrivate(a)) throw new IOException("Not a private address - refused.");
-                    var s = new Socket(a.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-                    try
-                    {
-                        using (token.Register(() => { try { s.Dispose(); } catch { } }))
-                        {
-                            var ar = s.BeginConnect(new IPEndPoint(a, ctx.DnsEndPoint.Port), null, null);
-                            if (!ar.AsyncWaitHandle.WaitOne(10000)) throw new TimeoutException("connect timed out");
-                            s.EndConnect(ar);
-                        }
-                        Net.Note("local", s.LocalEndPoint);
-                        return (Stream)new NetworkStream(s, true);
-                    }
-                    catch (Exception e) { last = e; try { s.Dispose(); } catch { } }
+                    // v1.5: through Net.DirectTcp, so the socket watchdog knows this one (a checked private address, not the VPN)
+                    try { return (Stream)new NetworkStream(Net.DirectTcp(a, ctx.DnsEndPoint.Port, "local", token), true); }
+                    catch (Exception e) { last = e; }
                 }
                 throw last ?? new IOException("No address to connect to.");
             }, token);

@@ -21,10 +21,11 @@ namespace HallowTorrents
         readonly Dictionary<string, Button> nav = new Dictionary<string, Button>();
         Border content; TextBlock sayText, meter; Button updateBtn; DispatcherTimer sayTimer;
         public bool Exiting;
-        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "search", "Search", "magnifying-glass" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "apps", "Radarr / Sonarr", "share-from-square" }, new[] { "settings", "Settings", "gear" } };
+        public static readonly string[][] Pages = { new[] { "transfers", "Transfers", "arrows-up-down" }, new[] { "search", "Search", "magnifying-glass" }, new[] { "rss", "RSS", "rss" }, new[] { "stats", "Statistics", "chart-simple" }, new[] { "apps", "Radarr / Sonarr", "share-from-square" }, new[] { "proof", "Speed & leaks", "gauge-high" }, new[] { "settings", "Settings", "gear" } };
         public static string PageId(string s)
         {
             var v = (s ?? "").Trim().ToLowerInvariant(); if (v == "list" || v == "torrents") v = "transfers"; if (v == "find" || v == "indexers") v = "search"; if (v == "webapi" || v == "radarr" || v == "sonarr" || v == "prowlarr" || v == "arr") v = "apps";
+            if (v == "speed" || v == "speedtest" || v == "leak-drill" || v == "leaks" || v == "watchdog" || v == "performance") v = "proof";
             return Pages.Any(p => p[0] == v) ? v : null;
         }
 
@@ -97,8 +98,8 @@ namespace HallowTorrents
         {
             page = PageId(id) ?? "transfers";
             foreach (var kv in nav) kv.Value.Tag = kv.Key == page ? "on" : null;
-            listPanel = null; statsBox = null; rssBox = null; searchBox = null;
-            content.Child = page == "settings" ? SettingsPage() : page == "apps" ? ApiPage() : page == "rss" ? RssPage() : page == "search" ? SearchPage() : page == "stats" ? StatsPage() : TransfersPage();
+            listPanel = null; statsBox = null; rssBox = null; searchBox = null; proofBox = null;
+            content.Child = page == "settings" ? SettingsPage() : page == "apps" ? ApiPage() : page == "rss" ? RssPage() : page == "search" ? SearchPage() : page == "stats" ? StatsPage() : page == "proof" ? ProofPage() : TransfersPage();
             Refresh();
         }
         public void Refresh()
@@ -108,6 +109,7 @@ namespace HallowTorrents
             else if (page == "stats" && statsBox != null) RefreshStats();
             else if (page == "rss" && rssBox != null) RefreshRss();
             else if (page == "search" && searchBox != null) RefreshSearchLock();
+            else if (page == "proof" && proofBox != null) RefreshProof();
         }
 
         // ---------------- adding
@@ -163,17 +165,18 @@ namespace HallowTorrents
         void Banners()
         {
             var vpnOk = !c.Locked; var game = c.SnapMode ? c.Game : c.Game;
-            var key = vpnOk + "|" + (c.SnapMode ? "" : c.Vpn.Key + c.Vpn.Server) + "|" + game + "|" + c.S.GameMode + "|" + c.S.LegalSeen + "|" + c.S.HandlerAsked + "|" + c.S.VpnSource;
+            var key = vpnOk + "|" + (c.SnapMode ? "" : c.Vpn.Key + c.Vpn.Server) + "|" + game + "|" + c.S.GameMode + "|" + c.S.LegalSeen + "|" + c.S.HandlerAsked + "|" + c.S.VpnSource + "|" + TrippedText;
             if (key == bannerKey) return; bannerKey = key;
             bannerPanel.Children.Clear();
-            if (!vpnOk)
+            var wd = WatchdogBanner(); if (wd != null) bannerPanel.Children.Add(wd);   // v1.5: the socket watchdog stopped everything
+            if (!vpnOk && wd == null)
             {
                 var b = Ui.Row(Ui.Btn("Connect Hallow VPN", () => { var e = c.ConnectVpn(); Say(e ?? "Asked Hallow VPN to connect to the fastest server..."); }, true), Ui.Btn("VPN settings", () => Show("settings")));
                 b.VerticalAlignment = VerticalAlignment.Center;
                 var msg = c.SnapMode ? "Hallow VPN isn't connected." : c.Vpn.Message;
                 bannerPanel.Children.Add(Dialogs.Banner("lock", "Red", "RedBg", "Connect your VPN to torrent. Everything is stopped - nothing goes out over your normal connection. " + msg, b));
             }
-            else
+            else if (wd == null)
             {
                 var v = c.Vpn; var where = c.SnapMode ? "NordLynx (10.5.0.2) · Hallow VPN: Netherlands #123" : v.Adapter + " (" + v.Ip + ")" + (v.Server != null ? " · Hallow VPN: " + (v.Country ?? "") + (v.Server != null ? " " + v.Server : "") : "");
                 bannerPanel.Children.Add(Dialogs.Banner("lock", "Green", "GreenBg", "Locked to your VPN: " + where + ". Every connection is bound to it; if it drops, torrents stop within a second.", null));

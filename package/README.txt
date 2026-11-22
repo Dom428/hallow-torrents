@@ -28,6 +28,23 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.5
+- Performance profiles (Settings > Performance): Balanced (default) talks to more peers at once and keeps
+  a bigger disk cache than 1.4; Max speed goes further; Light is for older or busy PCs. While a game runs
+  and "While you play" limits the speed, a small gaming profile is used. Advanced numbers if you want them.
+  None of this touches the VPN lock - every connection is still bound to the VPN.
+- Every finished download is rechecked before it counts as finished (MonoTorrent could leave a small
+  block unwritten in torrents with many small files); bad pieces are downloaded again.
+- "Prefer encryption" encrypts the handshake first, like qBittorrent - same peers, less CPU.
+- Socket watchdog (always on): every 3 seconds it checks this app's own connections in Windows' tables;
+  one on any address other than the VPN's stops all torrents at once with a red alert.
+- "Speed & leaks" page: a speed test with a legal torrent you pick (Ubuntu's current image is one click -
+  its .torrent comes from releases.ubuntu.com over the VPN, only when you click), and a leak drill that
+  disconnects your VPN on purpose while downloading and proves torrents locked within 2 seconds with no
+  connection outside the VPN, then resumes.
+- tools\speedtest.ps1 and tools\race.ps1 (in the install folder): the speed test from a script, and a race
+  against your own qBittorrent on the same torrent (qBittorrent is bound to the VPN adapter for the race).
+  You start them, with your VPN connected.
 WHAT'S NEW IN 1.4
 - Web interface for your phone or another PC (off by default): on the "Radarr / Sonarr" page turn on
   the Web API and "Serve the web interface at /ui/", then open http://localhost:8080/ui/ (or this PC's

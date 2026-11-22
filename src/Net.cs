@@ -6,6 +6,10 @@
 //     Windows sends a packet from a bound address only through the adapter that owns it, so nothing can go out via the normal connection;
 //     if the VPN adapter disappears, binding fails and nothing is sent at all.
 //   * IPv6 peers are refused (the VPN adapter's IPv4 is the only address used). UPnP / NAT-PMP port mapping is always off.
+//   * v1.5: the only sockets NOT bound to the VPN are made here too (Net.DirectTcp / DirectHttp): your own indexer manager at a private
+//     address (1.4, LocalNet.cs) and the GitHub update check. They register with the socket watchdog (SocketWatch.cs), which checks
+//     this process's own rows in Windows' TCP / UDP tables every 3 s and stops everything if any other socket is off the VPN address.
+//     The 1.5 performance profiles (Perf.cs) only change numbers - connections, cache, open files - never a socket's binding.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -163,6 +167,42 @@ namespace HallowTorrents
                 return s;
             }
             catch { try { s.Dispose(); } catch { } throw; }
+        }
+
+        // ---- v1.5: the only sockets that are NOT bound to the VPN, all made here: the 1.4 local-indexer exception (a private address,
+        // checked by the caller - LocalFetch) and the GitHub update check. Each registers its local port with the socket watchdog
+        // (SocketWatch.AllowDirect) before it connects, so the watchdog knows it; any other socket off the VPN address trips it.
+        public static Socket DirectTcp(IPAddress remote, int port, string why, CancellationToken token, int timeoutMs = 10000)
+        {
+            var s = new Socket(remote.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                s.Bind(new IPEndPoint(remote.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
+                SocketWatch.AllowDirect(((IPEndPoint)s.LocalEndPoint).Port, why, TimeSpan.FromMinutes(15));
+                using (token.Register(() => { try { s.Dispose(); } catch { } }))
+                {
+                    var ar = s.BeginConnect(new IPEndPoint(remote, port), null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(timeoutMs)) throw new TimeoutException("connect timed out");
+                    s.EndConnect(ar);
+                }
+                Note(why, s.LocalEndPoint);
+                return s;
+            }
+            catch { try { s.Dispose(); } catch { } throw; }
+        }
+        // the update check (Updater.cs): Windows' resolver and your normal connection, like any app's update check - never torrent traffic
+        public static HttpClient DirectHttp(string why)
+        {
+            var h = new StandardSocketsHttpHandler { UseProxy = false, Proxy = null, ConnectTimeout = TimeSpan.FromSeconds(15), AllowAutoRedirect = true };
+            h.ConnectCallback = (ctx, token) => Task.Run(() =>
+            {
+                var host = ctx.DnsEndPoint.Host.Trim('[', ']'); IPAddress lit;
+                var addrs = IPAddress.TryParse(host, out lit) ? new[] { lit } : Dns.GetHostAddresses(host).OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1).ToArray();
+                Exception last = null;
+                foreach (var a in addrs) { try { return (Stream)new NetworkStream(DirectTcp(a, ctx.DnsEndPoint.Port, why, token, 15000), true); } catch (Exception e) { last = e; } }
+                throw last ?? new IOException("Couldn't look up " + host);
+            }, token);
+            return new HttpClient(h) { Timeout = TimeSpan.FromSeconds(60) };
         }
 
         // ---- the engine's factories: everything bound to ip, DNS over the VPN's DNS servers (from the bound socket)

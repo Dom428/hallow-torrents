@@ -35,12 +35,13 @@ namespace HallowTorrents
         public static Version Current { get { return typeof(Updater).Assembly.GetName().Version; } }
         static string Api { get { var a = Environment.GetEnvironmentVariable("HALLOW_TORRENTS_API"); return string.IsNullOrEmpty(a) || TorSettings.TestDir == null ? "https://api.github.com" : a.TrimEnd('/'); } }
 
-        static WebClient Client()
+        // v1.5: through Net.DirectHttp, so the socket watchdog knows the update check's own sockets (they aren't torrent traffic and
+        // don't go over the VPN - the same as before, now registered)
+        static System.Net.Http.HttpClient Client()
         {
-            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            var wc = new WebClient();
-            wc.Headers[HttpRequestHeader.UserAgent] = "HallowTorrents";
-            return wc;
+            var c = Net.DirectHttp("update check");
+            c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "HallowTorrents");
+            return c;
         }
 
         // Newest release on GitHub, or null if it can't be reached.
@@ -50,8 +51,8 @@ namespace HallowTorrents
             {
                 using (var wc = Client())
                 {
-                    wc.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
-                    var json = wc.DownloadData(Api + "/repos/" + Repo + "/releases/latest");
+                    wc.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+                    var json = wc.GetByteArrayAsync(Api + "/repos/" + Repo + "/releases/latest").GetAwaiter().GetResult();
                     using (var ms = new MemoryStream(json)) return (GhRelease)new DataContractJsonSerializer(typeof(GhRelease)).ReadObject(ms);
                 }
             }
@@ -71,7 +72,12 @@ namespace HallowTorrents
                 if (Directory.Exists(dir)) Directory.Delete(dir, true);
                 Directory.CreateDirectory(dir);
                 var zip = Path.Combine(dir, "update.zip");
-                using (var wc = Client()) wc.DownloadFile(a.Url, zip);
+                using (var wc = Client())
+                using (var resp = wc.GetAsync(a.Url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+                {
+                    resp.EnsureSuccessStatusCode();
+                    using (var s = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()) using (var f = File.Create(zip)) s.CopyTo(f);
+                }
                 string hash;
                 using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
                 if (hash != a.Digest.Substring(7).ToLowerInvariant()) return "The download didn't match GitHub's checksum, so it wasn't installed.";

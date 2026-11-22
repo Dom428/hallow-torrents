@@ -142,7 +142,10 @@ namespace HallowTorrents
         {
             var h = GetStdHandle(-11);
             if (h == IntPtr.Zero || h == new IntPtr(-1)) AttachConsole(-1);   // not redirected: print to the console it was started from
-            string reply = string.IsNullOrWhiteSpace(line) ? "error no command" : Send("Torrents", line.Trim(), line.TrimStart().StartsWith("search") ? 45000 : 5000);
+            // search waits 45 s (indexers); 1.5: "speedtest ubuntu" fetches Ubuntu's torrent over the VPN (90 s), "leak-drill --wait" runs the whole drill (4 min)
+            var lt = line.Trim();
+            int wait = lt.StartsWith("search") ? 45000 : lt.StartsWith("leak-drill --wait") ? 240000 : lt.StartsWith("speedtest ") && lt != "speedtest status" && lt != "speedtest stop" ? 90000 : 5000;
+            string reply = string.IsNullOrWhiteSpace(line) ? "error no command" : Send("Torrents", lt, wait);
             int code = reply == null ? 2 : reply == "ok" || reply.StartsWith("ok ") ? 0 : 1;
             try
             {

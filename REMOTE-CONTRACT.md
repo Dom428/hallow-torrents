@@ -119,3 +119,20 @@ Torrents only ever run over the VPN. A torrent added or resumed from a phone **w
 ## The web interface (for comparison)
 
 The 1.4 web interface (`http://<address>:<port>/ui/`, off by default) uses the same shapes: `GET /ui/api/list` = `list`, `GET /ui/api/stats` = `stats`, `POST /ui/api/search` (`q`, `cat`, `n`) = `search` plus `ok` / `error`. It needs the Web API sign-in and an `X-CSRF-Token` header on every POST - Remote should use the pipe, not the web interface.
+
+## Speed test, leak drill, socket watchdog (1.5)
+
+Check `ping`'s `version` >= 1.5 first. None of these answers carries a peer address, the VPN address or another torrent's name.
+
+| Command | Answer |
+|---|---|
+| `speedtest` / `speedtest status` | `ok {"running":true,"state":"running","name":"...","progress":41.2,"bytes":...,"size":...,"avgMBps":36.8,"peakMBps":51.4,"avgMbit":308.7,"peakMbit":431.2,"seconds":...,"activeSeconds":...,"firstByteSeconds":3,"peersMax":61,"peersAvg":47,"cpuPct":1.6,"cpuPctOneCore":38,"profile":"balanced","started":"...","finished":null,"error":null,"source":"..."}` (`state`: `none`, `starting`, `waiting-vpn`, `held`, `running`, `done`, `stopped`, `error`) |
+| `speedtest ubuntu` / `speedtest <magnet>` / `speedtest <path.torrent>` | starts one (Ubuntu's current desktop .torrent is fetched from releases.ubuntu.com over the VPN); `error ...` while the VPN is off or one runs. `--cmd` waits 90 s for it. |
+| `speedtest stop` | `ok` (it pauses the torrent; the files stay in `<save folder>\Speed test`) |
+| `leak-drill` | `ok started ...` or `error <why it can't run>` (VPN off, nothing downloading, the watchdog stopped torrents) - it disconnects Hallow VPN on purpose, so only offer it behind a clear confirmation |
+| `leak-drill status` | `ok {"running":false,"state":"done","pass":true,"mode":"...","lockedMs":388,"socketsClosedMs":520,"resumedMs":7400,"samples":41,"socketsSeen":1312,"checks":[{"name":"...","pass":true,"detail":"..."}],"problems":0}` |
+| `leak-drill --wait` | runs it and answers with the report (`ok {...}` on PASS, `error FAIL {...}`); `--cmd` waits 4 minutes |
+| `watchdog` | `ok {"on":true,"everySeconds":3,"checks":1204,"lastSockets":31,"lastCheck":"...","alert":null,"alertAt":null,"locked":false}` - `alert` is a kind ("TCP socket on an address that isn't the VPN's"), never an address |
+| `watchdog resume` | after a watchdog stop: `ok resumed` (torrents start again on the VPN); `ok nothing to resume` |
+
+status.json (1.5) adds `perf` (`balanced` / `max` / `light` / `gaming`), `watchdog` (true), `watchdogLocked`, `speedTest`, `leakDrill` (running or not), `repairedPieces` (pieces the recheck on completion found bad on disk and downloaded again, this session).

@@ -103,8 +103,11 @@ namespace HallowTorrents
         [DataMember] public int ApiSessionMinutes = 60;      // a sign-in expires after this long unused
         // ---- v1.4: the web interface at http://<address>:<port>/ui/ - the same server, sign-in and security as the Web API. Off by default.
         [DataMember] public bool WebUiOn;
+        // ---- v1.5: performance (Perf.cs): a profile and optional Advanced numbers (0 = the profile's). Never touches the VPN lock.
+        [DataMember] public string Perf = "balanced";     // "balanced" / "max" / "light"
+        [DataMember] public int PerfConnections, PerfPerTorrent, PerfHalfOpen, PerfCacheMB, PerfUploadSlots, PerfOpenFiles;
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; }
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; }
 
         public static TorSettings Load()
         {
@@ -142,6 +145,7 @@ namespace HallowTorrents
             if (ApiPort < 1024 || ApiPort > 65535) ApiPort = 8080;
             System.Net.IPAddress bindIp; if (string.IsNullOrWhiteSpace(ApiBind) || !System.Net.IPAddress.TryParse(ApiBind.Trim(), out bindIp)) ApiBind = "127.0.0.1"; else ApiBind = bindIp.ToString();
             if (ApiSessionMinutes < 1) ApiSessionMinutes = 60; if (ApiSessionMinutes > 1440) ApiSessionMinutes = 1440;
+            HallowTorrents.Perf.Fix(this);
         }
         public Category Cat(string name)
         {

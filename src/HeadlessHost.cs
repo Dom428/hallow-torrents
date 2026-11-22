@@ -36,7 +36,7 @@ namespace HallowTorrents
 
         public TorSettings S = TorSettings.Load();
         readonly object sl = new object();
-        public Core Core; public Rss Rss; public SearchEngine Search; public VpnWatch Watch; public QbitApi Api; public ApiServer WebApi;
+        public Core Core; public Rss Rss; public SearchEngine Search; public VpnWatch Watch; public QbitApi Api; public ApiServer WebApi; public Proof Proof;
         public VpnState Vpn = new VpnState { Message = "Checking the VPN..." };
         public string Game, ApiStatus = "Off.";
         readonly ManualResetEvent quit = new ManualResetEvent(false);
@@ -67,6 +67,10 @@ namespace HallowTorrents
             Api = new QbitApi(Core, () => S, Change); Api.Log += Log; Api.Search = Search;
             Api.Ui = new WebUi(Api, () => S) { ConnectVpn = ConnectVpn, Game = () => Game, VpnText = () => Vpn.Ok ? "Connected (" + (Vpn.Server ?? Vpn.Adapter) + ")" : Vpn.Message };
             WebApi = new ApiServer(Api); ApplyApi();
+            // v1.5: the socket watchdog, the speed test and the leak drill (Proof.cs), the same as the app
+            Proof = new Proof(Core, () => S, () => Vpn, () => WebApi != null && WebApi.Running, Log);
+            Proof.Alert += reason => WriteStatus();
+            Proof.Start();
             Watch.Start();
             Every(1000, Tick);
             Every(3000, CheckGame, 0);
@@ -109,6 +113,7 @@ namespace HallowTorrents
                 Core.LimitDown = Scheduler.Min(S.DownKBps, rule == null ? 0 : rule.DownKBps, gameLimit);
                 Core.LimitUp = Scheduler.Min(S.UpKBps, rule == null ? 0 : rule.UpKBps, gameLimit);
                 Core.GameHold = Game != null && S.GameMode == "pause";
+                Core.Gaming = Game != null && S.GameMode == "limit";   // v1.5: the light "while gaming" profile
                 Core.Tick().Wait(30000);
                 if (++saveCount % 15 == 0) Core.Save();
             }
@@ -178,6 +183,8 @@ namespace HallowTorrents
             d["blocklistRanges"] = Core.BlocklistRanges;
             d["webApi"] = WebApi != null && WebApi.Running; d["indexers"] = Search.FeedCount;
             d["webUi"] = WebApi != null && WebApi.Running && S.WebUiOn; d["headless"] = true;
+            d["perf"] = Core.PerfNow.Name; d["watchdog"] = Proof != null; d["watchdogLocked"] = Core.Tripped != null;
+            d["speedTest"] = Proof != null && Proof.Speed.Running; d["leakDrill"] = Proof != null && Proof.Drill.Running; d["repairedPieces"] = Core.Repaired;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -228,6 +235,7 @@ namespace HallowTorrents
                 case "quit": new Thread(() => { Thread.Sleep(300); Quit(); }) { IsBackground = true }.Start(); return "ok";
             }
             var remote = RemoteApi.Pipe(cmd, arg, Core, Game); if (remote != null) { if (cmd == "pause" || cmd == "resume") WriteStatus(); return remote; }
+            var proof = Proof == null ? null : Proof.Pipe(cmd, arg, () => { Core.ClearTrip(); var v = Vpn; Task.Run(() => { try { Core.SetVpn(v).Wait(10000); } catch { } WriteStatus(); }); }); if (proof != null) { WriteStatus(); return proof; }
             if (TorSettings.TestDir != null && cmd == "test-vpn") return "ok " + Family.Json(new Dictionary<string, object> { { "ok", Vpn.Ok }, { "ip", Vpn.Ip == null ? null : Vpn.Ip.ToString() }, { "engine", Core.EngineUp }, { "message", Vpn.Message } });
             return "error unknown command";
         }
@@ -262,6 +270,7 @@ namespace HallowTorrents
             if (quitting) return; quitting = true; Log("headless: quit");
             foreach (var t in timers) try { t.Dispose(); } catch { }
             if (Watch != null) Watch.Dispose();
+            if (Proof != null) Proof.Dispose();
             if (WebApi != null) try { WebApi.Dispose(); } catch { }
             try { Core.Dispose(); } catch { }
             WriteStatus(false);

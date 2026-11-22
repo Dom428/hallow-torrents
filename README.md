@@ -39,6 +39,52 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Speed and proof (new in 1.5)
+
+**The goal:** never leak, and be as good as NordVPN + qBittorrent. The VPN lock was already strict; 1.5 adds proof that it holds, a watchdog behind it, and faster defaults measured on a benchmark.
+
+- **Performance profiles** (Settings > **Performance**): **Balanced** (default), **Max speed**, **Light**, plus *Advanced numbers* (peers at once, per torrent, connecting at once, disk cache, upload slots, open files; 0 = the profile's). Balanced allows 300 peers (100 per torrent, 1.4 had 150 / 60), 16 connection attempts at once (8), a 32 MB disk cache (5 MB), 256 open files and 3 duplicate requests per block in end-game mode (2). While a game runs and *While you play* is set to **Limit the speed**, a small gaming profile (50 peers, 4 MB cache, 3 upload slots) is used by itself; with **Pause all** nothing runs anyway. Changes apply straight away, also to running torrents. **Only numbers change - every socket still comes from the same VPN-bound code**, and the profile can't turn anything off.
+- **Every finished download is rechecked before it counts as finished** (fix): the benchmark caught MonoTorrent 3.0.2 reporting a torrent with many small files complete while a 16-32 KB block on disk had never been written (zeros) - in roughly 1 in 3 runs of the 2,000-file test, **with 1.4's settings too**. 1.5 rechecks every piece on disk when the engine says "done" and downloads any bad piece again (status.json `repairedPieces` counts them). It costs one read of the download (about 7 s for 2 GB). Also fixed: stopping the engine (VPN drop, quit) no longer cuts off data that was still being written from the cache - network first, then up to 30 s for the disk.
+- **Prefer encryption** now encrypts the handshake first and uses full-stream RC4 only when the other side asks (MonoTorrent's and qBittorrent's default) - the same peers connect, with **about a quarter less CPU** than 1.4's full-RC4-first order in the benchmark. *Require encryption* is unchanged. Everything is inside the VPN tunnel either way.
+- **Socket watchdog** (always on, no switch): every 3 seconds it reads Hallow Torrents' **own rows in Windows' TCP and UDP tables** (IPv4 and IPv6). Allowed: the VPN address (and one it was bound to in the last 2 minutes - a socket on a vanished adapter can't send), loopback, the Radarr / Sonarr Web API on the one address you picked while it runs, your own Prowlarr / Jackett at a private address (1.4's exception) and the GitHub update check - those two now register their own sockets with the watchdog before connecting. **Anything else** - your normal connection, 0.0.0.0, IPv6 - **stops every torrent at once** and shows a red alert; torrents stay stopped until you click *I've checked - resume*. Defence in depth: with the binding working it never fires.
+- **Speed test** (the **Speed & leaks** page, or the pipe `speedtest`): downloads a legal, well-seeded torrent you pick - one click uses **Ubuntu's current desktop image** (its .torrent is fetched from releases.ubuntu.com **over the VPN, only when you click**) - like any other torrent, and shows average and peak speed, time, peers and CPU. Files go to `<save folder>\Speed test`; it's paused when done (no seeding on by itself).
+- **Leak drill** (same page, or `leak-drill`): while a torrent downloads over your real VPN it **disconnects the VPN on purpose** (Hallow VPN through its pipe; your own VPN app - you disconnect it when asked) and checks: torrents locked **within 2 s**; **no socket of this app on a non-VPN address** (Windows' tables sampled every 100 ms through the whole drill); the engine's sockets closed; **no data moved** while locked; then it reconnects (the same server) and checks the download **resumes**, bound to the VPN again. A PASS / FAIL report on the page and in `leak-drill.json` / `.txt` in the data folder.
+- **Race against qBittorrent** (`tools\race.ps1` in the install folder): Hallow Torrents' speed test, then the **same torrent in your qBittorrent with its network interface bound to the VPN adapter** for the race (set through qBittorrent's Web UI, put back afterwards), and a comparison table. You start it, with your VPN connected. `tools\speedtest.ps1` is the speed test alone.
+- **uTP:** MonoTorrent 3.0.2 has **no uTP** (TCP peers only), so there's nothing to switch on. It could only ever be allowed with its UDP socket bound to the VPN like everything else.
+
+![Speed and leaks](docs/proof.png)
+
+![The socket watchdog's alert](docs/watchdog-alert.png)
+
+### The benchmark (local, on this PC - not the internet)
+
+`TorrentsTests.exe bench` builds a swarm on loopback addresses: a tracker, seeders and two other leechers (plain MonoTorrent engines, new for every run), and Hallow Torrents' own engine in a separate process bound to a stand-in VPN address, so its CPU, memory and disk writes are its own. Generated data in %TEMP% (2 GB in one file, and 2,000 files of 4-256 KB = 251 MB), deleted afterwards; BelowNormal priority; a run is thrown away and repeated if Delta Force or Discovery starts. Three set-ups: **lan** (4 seeders + 2 leechers, no limits - CPU / disk bound), **wan** (the same with 40 ms round-trip latency through a delay relay and 6 MB/s upload per peer), **crowd** (80 seeders, 40 ms, 320 KB/s each - like a popular torrent with many slow peers). "1.4 settings" = exactly what 1.4 ran (MonoTorrent's defaults, full-RC4-first, no recheck). Medians of 2 runs, final 1.5 build, Ryzen 9 7900X, NVMe:
+
+| Set-up, torrent | 1.4 settings | 1.5 Balanced | 1.5 Max speed |
+|---|---|---|---|
+| crowd, 2 GB | 18.2 MB/s - downloaded in 112.7 s | **24.3 MB/s - 84.3 s** (+34%); finished incl. recheck 94.5 s | 24.4 MB/s - 84.1 s |
+| wan, 2 GB | 23.2 MB/s - 88.3 s, CPU 98.6 s | 23.2 MB/s - 88.5 s, **CPU 75.2 s** (-24%) | 23.2 MB/s - 88.2 s, CPU 75.1 s |
+| wan, 2,000 files | 20.6 MB/s - 12.2 s | 21.5 MB/s - 11.7 s | 20.8 MB/s - 12.1 s |
+| lan, 2 GB | 95-132 MB/s over three rounds | 95-105 MB/s over three rounds | 90-114 MB/s |
+| lan, 2,000 files | 43.6 MB/s - 5.8 s, **1 run of 2 finished with 2 bad pieces on disk** | 43.1 MB/s - 5.8 s, every run verified | 43.9 MB/s - 5.7 s, every run verified |
+
+Also measured: peak memory 56-76 MB in every case (Balanced about 5 MB more than 1.4); bytes written = the download size, nothing extra; a full recheck of 2 GB from disk takes about 7 s (MonoTorrent hashes on one thread, ~290 MB/s).
+
+What it shows, honestly:
+- With **many peers** (crowd) Balanced is **a third faster**, because 1.4 stopped at 60 peers per torrent.
+- When the peers' own upload is the limit (wan), nothing on our side can make it faster - but 1.5 uses **about a quarter less CPU** for the same download (the encryption change).
+- On an unlimited loopback link (lan) the round-to-round noise is bigger than any difference, so no speed claim there.
+- **Integrity:** with 1.4's settings, about 1 in 3 runs of the 2,000-file torrent (6 of 16 in a separate check) "finished" with a 16-32 KB block of zeros on disk. 1.5's recheck found and re-downloaded those pieces every time (0 bad of 16 in the same check); it adds about 4-5 s per GB before a download counts as finished.
+- Max speed didn't beat Balanced here (it only matters with well over 100 peers), so **Balanced is the default**. These are loopback numbers - your real speed depends on the VPN server and the swarm; the **speed test** and **race** measure that.
+### Honest limits (MonoTorrent vs libtorrent)
+
+qBittorrent runs on libtorrent (C++); Hallow Torrents on MonoTorrent 3.0.2 (C#). What that means:
+
+- **No uTP** in MonoTorrent - only TCP peers. Some peers (mostly behind strict NATs, or that only speak uTP) won't connect.
+- **More CPU:** about 23-37 CPU-seconds per GB in the 1.5 benchmark (libtorrent typically needs a fraction of that). On a 12-core PC it's a few percent of the CPU; the gaming profile and game pause keep it out of your way.
+- **Piece verification is single-threaded** (~290 MB/s here: 7.2 s for 2 GB); libtorrent hashes on several threads.
+- **Not adjustable in 3.0.2:** the request queue depth per peer (MonoTorrent sizes it by itself), tracker and DHT announce intervals (the tracker's interval is used), file preallocation / sparse files. Choke / unchoke is tuned only through upload slots.
+- **No port forwarding** through NordVPN (it doesn't offer it), so incoming connections are rare - true for qBittorrent over NordVPN too.
 ## Search (new in 1.3)
 
 Search your **own** indexers from Hallow Torrents: **Prowlarr** or **Jackett** (on this PC or, later, your NAS) - or single **Torznab** feeds. There's no built-in site list and nothing is scraped from torrent websites.
@@ -127,9 +173,10 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
   - `add <magnet link or .torrent path> [--category <name>]` - for Hallow Browser and scripts: shows the Add window (or adds straight away if that's switched off); only `magnet:` links and existing `.torrent` files are accepted; `--category` picks one of your categories (and its folder)
   - `search <words> [--n 10] [--cat movies|tv|music|games|software|books|other]` (1.3) - searches your indexers over the VPN and answers the top N as JSON (title, indexer, size, seeders, peers, score, resolution / source / codec / HDR / audio / group, season / episode, category, flags, an `id`); `error waiting for the VPN...` while it's off (nothing is sent). `search-add <id> [--category <name>]` adds a result through the normal add. Never returns API keys.
   - `list`, `stats`, `pause <hash>`, `resume <hash>` (1.4) - for Hallow Remote and scripts: the list as JSON (name, progress, speeds, state, VPN-locked flag...), statistics, pause / resume one torrent; `add ... --direct` adds without the Add window. All shapes: [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md)
-  - `open [transfers|search|rss|stats|apps|settings]`
+  - `speedtest [ubuntu|<magnet>|<path.torrent>|status|stop]`, `leak-drill [status|--wait]`, `watchdog [resume]` (1.5) - see [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md); never an address
+  - `open [transfers|search|rss|stats|apps|proof|settings]`
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
-- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
+- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
 
 ## Good to know
 
@@ -137,5 +184,7 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
 - Local peer discovery talks to your home network (not the internet) and can't be bound to the VPN, so it's off unless you switch it on.
 - Built with the C# compiler in Windows (`build.ps1`). Third-party components and their licences: [licenses/THIRD-PARTY.md](licenses/THIRD-PARTY.md) - MonoTorrent 3.0.2 and its dependencies, all MIT.
 - Tests (`build.ps1 -Tests`, `tests\TorrentsTests.exe`) only use a local swarm on this PC: a local tracker, a local seeder, a local web server for RSS and blocklists, and Hallow Torrents bound to a stand-in VPN address (127.0.0.3). The 1.3 search tests (`TorrentsTests.exe search`) use a local Torznab stand-in (playing Prowlarr and Jackett, with fixture results: good releases, CAMs, fakes with an .exe, wrong sizes, a slow and a broken indexer) and check every request comes from the stand-in VPN address - real indexers are never called. The 1.4 tests (`TorrentsTests.exe local`, `web`, `headless`) check the private-address rules (including mixed answers, DNS rebinding to a public address and a redirect to a public host) against a stand-in local and a stand-in public server, the web interface (sign-in, CSRF, CSP, add a magnet / a .torrent, pause / resume, the search proxy) with the local swarm, the headless exe (no window, no WPF loaded, the pipe and the web interface), and the pipe's JSON shapes. The 1.2 contract tests (`TorrentsTests.exe arr`) replay the requests Radarr, Sonarr and Prowlarr send to qBittorrent against the Web API on 127.0.0.1 - no real *arr app is installed.
+
+The 1.5 tests (`TorrentsTests.exe unit15`, `proof`, `race`, `benchsmoke`, `app15`) check the profiles (the 1.4 baseline is exactly MonoTorrent's defaults; a live switch keeps the listener on the VPN address), the watchdog on Windows' real table during a download (no false alarm) and with an injected non-VPN row (locked in under a second, stays locked until resumed), real sockets on 0.0.0.0 / IPv6 / this PC's LAN address being caught, the leak drill against the stand-in VPN (PASS, and FAIL when a non-VPN socket appears during the drop), the speed test on the local swarm and Ubuntu's .torrent from a stand-in (never ubuntu.com), the benchmark at small sizes, `race.ps1` against a local qBittorrent Web API stand-in (bound before the torrent is added, put back afterwards) and the pipe of a test copy.
 
 Pictures use made-up torrents.

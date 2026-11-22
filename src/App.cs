@@ -105,6 +105,7 @@ namespace HallowTorrents
         public SearchEngine Search;           // v1.3: search through your Prowlarr / Jackett / Torznab feeds (over the VPN only)
         public SearchOutcome SnapSearch;      // --snap: made-up results
         public Stats SnapStats; public int SnapRanges;   // --snap: made-up statistics
+        public SpeedReport SnapSpeed; public DrillReport SnapDrill; public string SnapTripped;   // --snap: a made-up speed test / leak drill / watchdog alert
         public Stats StatsNow { get { return SnapMode ? SnapStats : Core.Stats; } }
 
         public Controller(bool trayOnly, bool snapMode = false)
@@ -127,6 +128,14 @@ namespace HallowTorrents
             // v1.4: the web interface on the same server (off unless you switch it on, and only while the Web API runs)
             Api.Ui = new WebUi(Api, () => S) { ConnectVpn = ConnectVpn, Game = () => Game, VpnText = () => Vpn.Ok ? "Connected (" + (Vpn.Server ?? Vpn.Adapter) + ")" : Vpn.Message };
             WebApi = new ApiServer(Api); ApplyApi();
+            // v1.5: the socket watchdog, the speed test and the leak drill (Proof.cs)
+            Proof = new Proof(Core, () => S, () => Vpn, () => ApiRunning, Log);
+            Proof.Alert += reason => ui.BeginInvoke(new Action(() =>
+            {
+                Notify("Torrents stopped by the socket watchdog", "A socket outside the VPN was found, so everything was stopped at once. Open Hallow Torrents to see it.");
+                WriteStatus(); var h = Ticked; if (h != null) h();
+            }));
+            Proof.Start();
             Watch.Start();
             var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) }; tick.Tick += (s, e) => Tick(); tick.Start();
             var gt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) }; gt.Tick += (s, e) => CheckGame(); gt.Start();
@@ -153,6 +162,15 @@ namespace HallowTorrents
         }
         void Log(string s) { lock (log) { log.Add(DateTime.Now.ToString("HH:mm:ss") + " " + s); if (log.Count > 120) log.RemoveAt(0); } }
         void RunOnUi(Action a) { if (ui.CheckAccess()) a(); else ui.Invoke(a, TimeSpan.FromSeconds(5)); }
+
+        // ---------------- v1.5: proof (the socket watchdog, the speed test, the leak drill)
+        public Proof Proof;
+        // the watchdog's red alert: "Resume" after you checked - the engine is built again on the VPN (if it's up)
+        public void ResumeAfterWatchdog()
+        {
+            if (SnapMode || Core.Tripped == null) return;
+            Core.ClearTrip(); var v = Vpn; Task.Run(() => { try { Core.SetVpn(v).Wait(10000); } catch (Exception e) { Log("engine: " + e.Message); } ui.BeginInvoke(new Action(() => { WriteStatus(); var h = Ticked; if (h != null) h(); })); });
+        }
 
         // ---------------- v1.2: the Web API for Radarr / Sonarr / Prowlarr
         public QbitApi Api; public ApiServer WebApi;
@@ -203,6 +221,7 @@ namespace HallowTorrents
             Core.LimitDown = Scheduler.Min(S.DownKBps, rule == null ? 0 : rule.DownKBps, gameLimit);
             Core.LimitUp = Scheduler.Min(S.UpKBps, rule == null ? 0 : rule.UpKBps, gameLimit);
             Core.GameHold = Game != null && S.GameMode == "pause";
+            Core.Gaming = Game != null && S.GameMode == "limit";   // v1.5: the light "while gaming" profile
             ticking = true;
             Task.Run(async () => { try { await Core.Tick().ConfigureAwait(false); } catch (Exception e) { Log("tick: " + e.Message); } })
                 .ContinueWith(t => ui.BeginInvoke(new Action(() => { ticking = false; var h = Ticked; if (h != null) h(); })));
@@ -363,6 +382,7 @@ namespace HallowTorrents
             Log("quit");
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
             if (Watch != null) Watch.Dispose();
+            if (Proof != null) Proof.Dispose();
             if (WebApi != null) try { WebApi.Dispose(); } catch { }
             try { Core.Dispose(); } catch { }
             WriteStatus(false);
@@ -529,6 +549,9 @@ namespace HallowTorrents
             d["indexers"] = Search == null ? 0 : Search.FeedCount;
             // v1.4: whether the web interface is served (never its address) and that this is the windowed app
             d["webUi"] = ApiRunning && S.WebUiOn; d["headless"] = false;
+            // v1.5: the performance profile in use, and the socket watchdog (whether it stopped torrents - never the socket's address)
+            d["perf"] = Core.PerfNow.Name; d["watchdog"] = Proof != null; d["watchdogLocked"] = Core.Tripped != null;
+            d["speedTest"] = Proof != null && Proof.Speed.Running; d["leakDrill"] = Proof != null && Proof.Drill.Running; d["repairedPieces"] = Core.Repaired;
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -552,6 +575,8 @@ namespace HallowTorrents
             }
             // v1.4: list, stats, pause <hash>, resume <hash> - what a phone page needs (Hallow Remote; REMOTE-CONTRACT.md)
             var remote = RemoteApi.Pipe(cmd, arg, Core, Game); if (remote != null) { if (cmd == "pause" || cmd == "resume") WriteStatus(); return remote; }
+            // v1.5: speedtest, leak-drill, watchdog
+            var proof = Proof == null ? null : Proof.Pipe(cmd, arg, () => ResumeAfterWatchdog()); if (proof != null) { WriteStatus(); return proof; }
             if (TorSettings.TestDir != null && cmd.StartsWith("test-")) return OnUi(() => TestCommand(cmd, arg));
             return "error unknown command";
         }

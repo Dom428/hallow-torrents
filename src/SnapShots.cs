@@ -102,6 +102,16 @@ namespace HallowTorrents
             Snap.Save(Dialogs.IndexersWindow(c, null), Path.Combine(dir, "dialog-indexers.png"), 720, 0);
             Snap.Save(Dialogs.ProfileWindow(c, null), Path.Combine(dir, "dialog-ranking.png"), 640, 0);
             w.SnapDetail("6", "safety"); Snap.Save(w, Path.Combine(dir, "transfers-flagged.png"), 1260, 780);
+            // v1.5: the Speed & leaks page with a made-up speed test and leak drill, and the watchdog's red alert
+            c.SnapSpeed = new SpeedReport { Name = "ubuntu-26.04-desktop-amd64.iso", State = "done", Size = 6114656256, Bytes = 6114656256, Progress = 100, AvgMBps = 36.8, PeakMBps = 51.4, ActiveSeconds = 158, Seconds = 158, FirstByteSeconds = 3, PeersMax = 61, PeersAvg = 47, CpuPct = 1.6, CpuPctOneCore = 38, Profile = "balanced", Started = Family.Time(now.AddMinutes(-9)), Finished = Family.Time(now.AddMinutes(-6)) };
+            c.SnapDrill = new DrillReport { State = "done", Pass = true, Mode = "Hallow VPN (disconnected through its pipe)", Started = Family.Time(now.AddMinutes(-4)), Finished = Family.Time(now.AddMinutes(-3)), LockedMs = 388, SocketsClosedMs = 520, ResumedMs = 7400 };
+            foreach (var ch in new[] { new[] { "Before: engine bound to the VPN and a torrent downloading", "bound to the VPN address" }, new[] { "Asked Hallow VPN to disconnect", "ok" }, new[] { "Torrents locked within 2 s", "engine stopped after 388 ms" }, new[] { "No socket on a non-VPN address (Windows' TCP / UDP tables, 41 samples)", "1,312 socket rows checked" }, new[] { "The engine's sockets closed", "none left on the VPN address after 520 ms" }, new[] { "No data moved after the lock", "0 B after the lock" }, new[] { "Asked Hallow VPN to reconnect", "ok connecting" }, new[] { "Torrents started again when the VPN was back", "engine up after 6.1 s, bound to the VPN address" }, new[] { "The download resumed", "data again 7.4 s after reconnecting" }, new[] { "Bound to the VPN address again", "bound to the VPN adapter Hallow VPN" }, new[] { "No socket on a non-VPN address during the whole drill", "" } })
+                c.SnapDrill.Add(ch[0], true, ch[1]);
+            w.Show("proof"); Snap.Save(w, Path.Combine(dir, "proof.png"), 1260, 930);
+            c.SnapTripped = "TCP 192.168.1.20:51234 -> 203.0.113.9:6881 (established): on 192.168.1.20, which isn't the VPN's address";
+            foreach (var v in c.SnapViews) { v.DownRate = 0; v.UpRate = 0; v.Seeds = 0; v.Leechs = 0; if (!v.Paused) v.State = "Waiting for VPN"; }
+            c.SnapLocked = true; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "watchdog-alert.png"), 1260, 780);
+            c.SnapTripped = null; c.SnapLocked = false; c.SnapViews = Made();
             w.SnapDetail("2", "general"); Snap.Save(w, Path.Combine(dir, "transfers-details.png"), 1260, 780);
             // the VPN is off: everything stopped, the banner with Connect
             c.SnapLocked = true; foreach (var v in c.SnapViews) { v.DownRate = 0; v.UpRate = 0; v.Seeds = 0; v.Leechs = 0; if (!v.Paused) v.State = "Waiting for VPN"; }
@@ -111,7 +121,7 @@ namespace HallowTorrents
             c.Game = "Delta Force"; c.S.LegalSeen = false; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "game-paused.png"), 1260, 780);
             c.S.LegalSeen = true; c.S.HandlerAsked = false; c.Game = null; c.SnapViews = Made(); w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "ask-handler.png"), 1260, 780);
             c.S.HandlerAsked = true;
-            w.Show("settings"); Snap.Save(w, Path.Combine(dir, "settings.png"), 1260, 2950);
+            w.Show("settings"); Snap.Save(w, Path.Combine(dir, "settings.png"), 1260, 3300);
             // v1.2: the Radarr / Sonarr page (made-up sign-in and addresses; nothing listens)
             c.S.ApiOn = true; c.S.WebUiOn = true; c.S.ApiUser = "radarr"; c.S.ApiPassHash = "made-up"; c.S.ApiAllow = "192.168.1.20";
             c.S.Categories.Add(new Category { Name = "radarr", SaveFolder = @"\\NAS\downloads\radarr", Naming = "keep" }); c.S.Categories.Add(new Category { Name = "tv-sonarr", SaveFolder = @"\\NAS\downloads\tv-sonarr", Naming = "keep" });

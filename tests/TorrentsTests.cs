@@ -34,6 +34,9 @@ namespace HallowTorrents.Tests
             Directory.CreateDirectory(Dir);
             Environment.SetEnvironmentVariable("HALLOW_TORRENTS_TESTDIR", Dir);
             var only = args.FirstOrDefault(a => !a.StartsWith("-"));
+            // 1.5: the local speed benchmark (Bench15.cs) - not part of the suite (the suite runs a small smoke version: benchsmoke)
+            if (only == "bench-client") return Bench.Client(args);
+            if (only == "bench") { var code = Bench.Orchestrate(args); try { Directory.Delete(Dir, true); } catch { } return code; }
             try
             {
                 if (only == null || only == "unit") { Names(); Suspicious(); Categories(); Plans(); VpnDecide(); DnsPackets(); HandlerFake(); Defender(); ModeAndContrast(); V11Unit(); V12Unit(); V13Unit(); }
@@ -48,6 +51,12 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "local") Local14().Wait();
                 if (only == null || only == "web") Web14().Wait();
                 if (only == null || only == "headless") Headless14();
+                // 1.5: performance profiles, the socket watchdog, the leak drill, the speed test, the benchmark harness, race.ps1
+                if (only == null || only == "unit" || only == "unit15") V15Unit();
+                if (only == null || only == "proof") { Proof15().Wait(); Verify15().Wait(); }
+                if (only == null || only == "race") Race15();
+                if (only == null || only == "benchsmoke") BenchSmoke15();
+                if (only == null || only == "app15") AppCopy15();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

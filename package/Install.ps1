@@ -17,6 +17,8 @@ Copy-Item (Join-Path $PSScriptRoot 'HallowTorrents.exe') $dest -Force
 if (Test-Path (Join-Path $PSScriptRoot 'HallowTorrentsHeadless.exe')) { Copy-Item (Join-Path $PSScriptRoot 'HallowTorrentsHeadless.exe') $dest -Force }
 Copy-Item (Join-Path $PSScriptRoot '*.dll') $dest -Force
 foreach ($f in 'README.txt', 'Uninstall.ps1', 'FontAwesome-LICENSE.txt', 'NAS-MODE.md', 'REMOTE-CONTRACT.md') { Copy-Item (Join-Path $PSScriptRoot $f) $dest -Force -ErrorAction SilentlyContinue }
+# 1.5: the speed test and race scripts (you start them yourself)
+if (Test-Path (Join-Path $PSScriptRoot 'tools')) { New-Item -ItemType Directory -Force (Join-Path $dest 'tools') | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'tools\*.ps1') (Join-Path $dest 'tools') -Force }
 if (Test-Path (Join-Path $PSScriptRoot 'licenses')) { New-Item -ItemType Directory -Force (Join-Path $dest 'licenses') | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'licenses\*') (Join-Path $dest 'licenses') -Force }
 $exe = Join-Path $dest 'HallowTorrents.exe'
 $u = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\HallowTorrents'

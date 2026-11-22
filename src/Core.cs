@@ -111,6 +111,12 @@ namespace HallowTorrents
         public string Hold { get { return engine == null ? "vpn" : GameHold ? "game" : null; } }   // null, "vpn", "game"
         public int LimitDown, LimitUp;   // engine-wide KB/s right now (settings + schedule + game limit; 0 = none)
         public string LastError; public int Blocked; public int BlocklistRanges; public string BlocklistError;
+        // v1.5: the performance profile in use (Perf.cs); Gaming = a game runs and "While you play" limits the speed -> the light gaming numbers
+        public bool Gaming;
+        public static List<EncryptionType> BenchEncryption; public static int BenchCacheBytes = -1;
+        public PerfValues PerfNow { get { return Perf.For(S, Gaming); } }
+        // v1.5: the socket watchdog found a socket outside the VPN: the engine is stopped and stays stopped until you resume it
+        public volatile string Tripped; public string TrippedAt;
         public readonly Stats Stats;
         public event Action<Entry> Completed;
         public event Action<string> Log;
@@ -212,6 +218,7 @@ namespace HallowTorrents
         {
             var key = st != null && st.Ok ? st.Ip + "|" + string.Join(",", st.Dns) : null;
             if (key == null) { await Teardown("the VPN is down").ConfigureAwait(false); return; }
+            if (Tripped != null) { await Teardown("stopped by the socket watchdog").ConfigureAwait(false); return; }
             if (engine != null && key == boundKey) return;
             await Teardown("the VPN changed").ConfigureAwait(false);
             await Build(st.Ip, st.Dns, key).ConfigureAwait(false);
@@ -232,9 +239,27 @@ namespace HallowTorrents
             BoundIp = null; boundKey = null;
             if (e == null) return;
             L("engine down: " + why);
-            try { await Task.WhenAny(Task.WhenAll(ms.Select(m => SafeStop(m.Value))), Task.Delay(700)).ConfigureAwait(false); } catch { }
-            try { e.Dispose(); } catch { }
+            var stops = Task.WhenAll(ms.Select(m => SafeStop(m.Value)));
+            try { await Task.WhenAny(stops, Task.Delay(700)).ConfigureAwait(false); } catch { }
+            if (stops.IsCompleted) { try { e.Dispose(); } catch { } return; }
+            // v1.5 fix: a stop that is still writing its disk cache isn't cut off any more (1.4 disposed the engine after 0.7 s, and data
+            // that was verified but still in the cache could be lost). The network goes first: peer connections are already closed by
+            // StopAsync; the listener and DHT are switched off now; then the stops get up to 30 s to flush before the engine is disposed.
+            // A rebuild (the VPN back) and quitting wait for that.
+            try { var b = new EngineSettingsBuilder(e.Settings) { DhtEndPoint = null }; b.ListenEndPoints = new Dictionary<string, IPEndPoint>(); await Task.WhenAny(e.UpdateSettingsAsync(b.ToSettings()), Task.Delay(200)).ConfigureAwait(false); } catch { }
+            L("engine down: still writing cached data to disk");
+            flushing = Task.Run(async () => { try { await Task.WhenAny(stops, Task.Delay(30000)).ConfigureAwait(false); } catch { } try { e.Dispose(); } catch { } L("engine disposed"); });
         }
+        Task flushing = Task.FromResult(0);
+        public bool Flushing { get { return !flushing.IsCompleted; } }
+        // v1.5: the socket watchdog (SocketWatch) found a socket that isn't on the VPN address: stop everything now; nothing is rebuilt
+        // until ClearTrip (you clicked Resume after checking).
+        public async Task Trip(string reason)
+        {
+            if (Tripped == null) { Tripped = reason; TrippedAt = Family.Time(DateTime.Now); L("socket watchdog: " + reason); }
+            await Teardown("socket watchdog: " + reason).ConfigureAwait(false);
+        }
+        public void ClearTrip() { if (Tripped != null) L("socket watchdog: cleared"); Tripped = null; TrippedAt = null; }
         static async Task SafeStop(TorrentManager m) { try { await m.StopAsync(TimeSpan.FromMilliseconds(300)).ConfigureAwait(false); } catch { } }
 
         public EngineSettings EngineSettingsFor(IPAddress ip)
@@ -245,12 +270,23 @@ namespace HallowTorrents
                 CacheDirectory = Path.Combine(Dir, "cache"), DhtEndPoint = S.Dht ? new IPEndPoint(ip, S.Port) : null,
                 MaximumDownloadRate = LimitDown * 1024, MaximumUploadRate = LimitUp * 1024
             };
+            // v1.5: the performance profile (only numbers - every socket still comes from Net.Bound, bound to the VPN address)
+            var p = PerfNow;
+            b.MaximumConnections = p.Connections; b.MaximumHalfOpenConnections = p.HalfOpen; b.DiskCacheBytes = p.CacheMB * 1024 * 1024; b.MaximumOpenFiles = p.OpenFiles;
             b.ListenEndPoints = new Dictionary<string, IPEndPoint> { { "ipv4", new IPEndPoint(ip, S.Port) } };
-            b.AllowedEncryption = S.Encryption == "require" ? new List<EncryptionType> { EncryptionType.RC4Full, EncryptionType.RC4Header } : new List<EncryptionType> { EncryptionType.RC4Full, EncryptionType.RC4Header, EncryptionType.PlainText };
+            // v1.5: "prefer" now offers an encrypted handshake first (RC4Header - like MonoTorrent's and qBittorrent's defaults) instead of
+            // full-stream RC4: the same peers connect, and the benchmark showed about a quarter less CPU per GB. Everything is inside the VPN tunnel
+            // anyway. "require" is unchanged. ("v14" = 1.4's order, for the benchmark's baseline only.)
+            b.AllowedEncryption = S.Encryption == "require" ? new List<EncryptionType> { EncryptionType.RC4Full, EncryptionType.RC4Header }
+                : S.Perf == "v14" ? new List<EncryptionType> { EncryptionType.RC4Full, EncryptionType.RC4Header, EncryptionType.PlainText }
+                : new List<EncryptionType> { EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText };
+            if (BenchEncryption != null) b.AllowedEncryption = BenchEncryption;   // the benchmark's experiments only (null in the app)
+            if (BenchCacheBytes >= 0) b.DiskCacheBytes = BenchCacheBytes;
             return b.ToSettings();
         }
         async Task Build(IPAddress ip, List<IPAddress> dns, string key)
         {
+            try { await Task.WhenAny(flushing, Task.Delay(35000)).ConfigureAwait(false); } catch { }   // v1.5: the old engine's disk cache first
             await op.WaitAsync().ConfigureAwait(false);
             try
             {
@@ -258,7 +294,7 @@ namespace HallowTorrents
                 var e = new ClientEngine(EngineSettingsFor(ip), Net.Bound(ip, dns));
                 LoadBlocklist(e);
                 e.CriticalException += (s, a) => { LastError = a.Exception.Message; L("critical: " + a.Exception.Message); };
-                engine = e; BoundIp = ip; boundDns = dns; boundKey = key;
+                engine = e; BoundIp = ip; boundDns = dns; boundKey = key; appliedPerf = PerfKey(PerfNow); appliedEndgame = PerfNow.Endgame; NoteVpnIp(ip);
                 L("engine up, bound to " + ip + ":" + S.Port);
                 List<Entry> es; lock (lk) es = Entries.ToList();
                 foreach (var x in es) { try { await Attach(x).ConfigureAwait(false); } catch (Exception ex) { L("attach " + x.Id + ": " + ex.Message); } }
@@ -297,8 +333,25 @@ namespace HallowTorrents
             return new TorrentSettingsBuilder
             {
                 AllowDht = S.Dht, AllowPeerExchange = S.Pex, AllowInitialSeeding = x.SuperSeed, CreateContainingDirectory = true,
-                MaximumDownloadRate = x.DownKBps * 1024, MaximumUploadRate = x.UpKBps * 1024
+                MaximumDownloadRate = x.DownKBps * 1024, MaximumUploadRate = x.UpKBps * 1024,
+                MaximumConnections = PerfNow.PerTorrent, UploadSlots = PerfNow.UploadSlots
             }.ToSettings();
+        }
+        // v1.5: the normal piece picker with the profile's end-game duplicates (MonoTorrent's default is 2 - left alone then)
+        static MonoTorrent.PiecePicking.IPieceRequester Picker(int endgame)
+        {
+            return new MonoTorrent.PiecePicking.StandardPieceRequester(new MonoTorrent.PiecePicking.PieceRequesterSettings(true, true, true, Math.Max(1, endgame)));
+        }
+        string appliedPerf; int appliedEndgame = 2;
+        static string PerfKey(PerfValues p) { return p.Connections + "|" + p.PerTorrent + "|" + p.HalfOpen + "|" + p.CacheMB + "|" + p.OpenFiles + "|" + p.UploadSlots + "|" + p.Endgame; }
+        // VPN addresses the engine was bound to (the watchdog accepts sockets on them for a while after the VPN changed)
+        public readonly Dictionary<IPAddress, DateTime> RecentVpnIps = new Dictionary<IPAddress, DateTime>();
+        void NoteVpnIp(IPAddress ip) { if (ip == null) return; lock (RecentVpnIps) RecentVpnIps[ip] = DateTime.UtcNow; }
+        public List<IPAddress> VpnIpsForWatch(TimeSpan keep)
+        {
+            var r = new List<IPAddress>(); var b = BoundIp; if (b != null) NoteVpnIp(b);
+            lock (RecentVpnIps) { foreach (var kv in RecentVpnIps.ToList()) { if (DateTime.UtcNow - kv.Value <= keep) r.Add(kv.Key); else RecentVpnIps.Remove(kv.Key); } }
+            return r;
         }
         async Task Attach(Entry x)
         {
@@ -311,6 +364,7 @@ namespace HallowTorrents
             if (m.HasMetadata) { await ApplyFiles(x, m).ConfigureAwait(false); await ApplyPaths(x, m).ConfigureAwait(false); }
             if (x.Trackers != null) await ApplyTrackers(x, m).ConfigureAwait(false);
             if (x.Sequential) { try { await m.ChangePickerAsync(new MonoTorrent.PiecePicking.StreamingPieceRequester()).ConfigureAwait(false); } catch (Exception ex) { L("sequential: " + ex.Message); } }
+            else if (PerfNow.Endgame != 2) { try { await m.ChangePickerAsync(Picker(PerfNow.Endgame)).ConfigureAwait(false); } catch (Exception ex) { L("picker: " + ex.Message); } }
         }
         static Priority ToPrio(int p) { return p <= 0 ? Priority.DoNotDownload : p == 1 ? Priority.Low : p >= 3 ? Priority.High : Priority.Normal; }
         async Task ApplyFiles(Entry x, TorrentManager m)
@@ -340,6 +394,11 @@ namespace HallowTorrents
                     if (m.HasMetadata && (x.Files == null || x.TorrentFile == null)) GotMetadata(x, m);
                     if (m.HasMetadata && m.Complete && x.CompletedAt == null && m.State != TorrentState.Hashing && m.State != TorrentState.HashingPaused)
                     {
+                        // v1.5: a full recheck of what's on disk before it counts as finished (MonoTorrent 3.0.2 can report a torrent with
+                        // many small files complete while a block on disk was never written - found by the 1.5 benchmark). Bad pieces are
+                        // downloaded again. "v14" (the benchmark's 1.4 baseline) skips it, like 1.4 did.
+                        bool verified; lock (lk) verified = verifiedIds.Contains(kv.Key);
+                        if (!verified && !x.Created && S.Perf != "v14") { StartVerify(x, m); continue; }
                         x.CompletedAt = Family.Time(DateTime.Now); L("complete " + x.Id); Save();
                         var h = Completed; if (h != null) try { h(x); } catch { }
                     }
@@ -349,6 +408,35 @@ namespace HallowTorrents
             }
             bool waiting; lock (lk) waiting = e == null && Entries.Any(x => !x.UserPaused);
             Stats.Tick(tickDown, tickUp, anySeeding, waiting, Blocked);
+        }
+        // ---- v1.5: verify on completion
+        readonly HashSet<string> verifying = new HashSet<string>(), verifiedIds = new HashSet<string>();
+        readonly Dictionary<string, int> repairs = new Dictionary<string, int>();
+        public int Repaired;   // pieces found bad on disk and downloaded again (this session)
+        public bool Verifying(string id) { lock (lk) return verifying.Contains(id); }
+        void StartVerify(Entry x, TorrentManager m)
+        {
+            lock (lk) { if (!verifying.Add(x.Id)) return; }
+            Task.Run(async () =>
+            {
+                try
+                {
+                    L("verifying " + x.Id);
+                    await m.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+                    await m.HashCheckAsync(false).ConfigureAwait(false);
+                    int tries; lock (lk) { repairs.TryGetValue(x.Id, out tries); }
+                    if (m.Complete || tries >= 3) { lock (lk) verifiedIds.Add(x.Id); if (!m.Complete) L("verify: still incomplete after 3 repairs " + x.Id); else L("verified " + x.Id); }
+                    else
+                    {
+                        int bad = m.Bitfield.Length - m.Bitfield.TrueCount; Interlocked.Add(ref Repaired, bad);
+                        lock (lk) repairs[x.Id] = tries + 1;
+                        L("verify: " + bad + " piece(s) on disk were bad - downloading them again " + x.Id);
+                    }
+                }
+                catch (Exception ex) { L("verify " + x.Id + ": " + ex.Message); }
+                finally { lock (lk) verifying.Remove(x.Id); }
+                Kick();
+            });
         }
         void GotMetadata(Entry x, TorrentManager m)
         {
@@ -388,10 +476,24 @@ namespace HallowTorrents
                     var b = new EngineSettingsBuilder(e.Settings) { MaximumDownloadRate = LimitDown * 1024, MaximumUploadRate = LimitUp * 1024 };
                     await e.UpdateSettingsAsync(b.ToSettings()).ConfigureAwait(false); appliedDown = LimitDown; appliedUp = LimitUp;
                 }
+                // v1.5: the profile changed (Settings, or a game started / stopped with "Limit the speed"): applied live, same sockets
+                var pv = PerfNow; var pk = PerfKey(pv);
+                if (pk != appliedPerf && BoundIp != null)
+                {
+                    await e.UpdateSettingsAsync(EngineSettingsFor(BoundIp)).ConfigureAwait(false);
+                    List<KeyValuePair<string, TorrentManager>> all; lock (lk) all = mgr.ToList();
+                    foreach (var kv in all)
+                    {
+                        var x = Get(kv.Key); if (x == null) continue;
+                        try { await kv.Value.UpdateSettingsAsync(SettingsFor(x)).ConfigureAwait(false); if (!x.Sequential && pv.Endgame != appliedEndgame) await kv.Value.ChangePickerAsync(Picker(pv.Endgame)).ConfigureAwait(false); } catch (Exception ex) { L("perf " + ex.Message); }
+                    }
+                    appliedPerf = pk; appliedEndgame = pv.Endgame; L("performance: " + Perf.Label(pv.Name) + " - " + pv.Summary);
+                }
                 var want = Wanted();
                 List<KeyValuePair<string, TorrentManager>> ms; lock (lk) ms = mgr.ToList();
                 foreach (var kv in ms)
                 {
+                    if (Verifying(kv.Key)) continue;   // v1.5: its recheck runs (it's started again afterwards)
                     var m = kv.Value; bool run = want.Contains(kv.Key);
                     bool active = m.State != TorrentState.Stopped && m.State != TorrentState.Stopping && m.State != TorrentState.Error && m.State != TorrentState.Paused;
                     if (run && !active && m.State != TorrentState.Stopping) await m.StartAsync().ConfigureAwait(false);
@@ -473,7 +575,7 @@ namespace HallowTorrents
             try
             {
                 await m.UpdateSettingsAsync(SettingsFor(x)).ConfigureAwait(false);
-                if (seqChanged) await m.ChangePickerAsync(sequential ? (MonoTorrent.PiecePicking.IPieceRequester)new MonoTorrent.PiecePicking.StreamingPieceRequester() : new MonoTorrent.PiecePicking.StandardPieceRequester(MonoTorrent.PiecePicking.PieceRequesterSettings.Default)).ConfigureAwait(false);
+                if (seqChanged) await m.ChangePickerAsync(sequential ? (MonoTorrent.PiecePicking.IPieceRequester)new MonoTorrent.PiecePicking.StreamingPieceRequester() : Picker(PerfNow.Endgame)).ConfigureAwait(false);
             }
             catch (Exception ex) { L("flags " + ex.Message); }
         }
@@ -783,6 +885,6 @@ namespace HallowTorrents
         public long TotalDown { get { var e = engine; return e == null ? 0 : e.TotalDownloadRate; } }
         public long TotalUp { get { var e = engine; return e == null ? 0 : e.TotalUploadRate; } }
         public TorrentManager ManagerForTests(string id) { return M(id); }
-        public void Dispose() { try { Teardown("quit").Wait(3000); } catch { } Save(); }
+        public void Dispose() { try { Teardown("quit").Wait(3000); } catch { } try { flushing.Wait(30000); } catch { } Save(); }   // quitting waits for the disk cache
     }
 }
