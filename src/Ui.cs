@@ -1,0 +1,133 @@
+﻿// Hallow Torrents - small helpers for building WPF in code (no XAML compiler): theme brushes by key, text, buttons, cards, dark title
+// bars, program icons. No colour is written here: everything comes from Theme.xaml (so a light mode is one more dictionary).
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+
+namespace HallowTorrents
+{
+    public static class Ui
+    {
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
+        public static Brush R(string key) { return (Brush)Application.Current.FindResource(key); }
+        public static Style S(string key) { return (Style)Application.Current.FindResource(key); }
+        public static FontFamily Mono { get { return (FontFamily)Application.Current.FindResource("MonoFont"); } }
+        public static FontFamily Head { get { return (FontFamily)Application.Current.FindResource("HeadFont"); } }
+
+        public static void Dress(Window w, string title, double width)
+        {
+            w.Title = title; w.Width = width; w.SizeToContent = SizeToContent.Height;
+            Restyle(w); w.FontSize = 12.5;
+            try { w.Icon = AppIcon(); } catch { }
+            w.SourceInitialized += (s, e) => TitleBar(w);
+        }
+        public static void TitleBar(Window w) { try { var h = new WindowInteropHelper(w).Handle; if (h == IntPtr.Zero) return; int dark = Mode.IsLight ? 0 : 1; DwmSetWindowAttribute(h, 20, ref dark, 4); } catch { } }
+        public static void Restyle(Window w) { w.Background = R("Bg"); w.Foreground = R("Text"); w.FontFamily = (FontFamily)Application.Current.FindResource("BodyFont"); }
+        static ImageSource icon;
+        public static ImageSource AppIcon()
+        {
+            if (icon != null) return icon;
+            var ico = System.Drawing.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
+            icon = Imaging.CreateBitmapSourceFromHIcon(ico.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions()); icon.Freeze();
+            return icon;
+        }
+        public static TextBlock T(string text, double size = 12.5, bool bold = false, Brush fg = null, double bottom = 0)
+        {
+            var t = new TextBlock { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, bottom) };
+            if (bold) t.FontWeight = FontWeights.SemiBold; if (fg != null) t.Foreground = fg;
+            return t;
+        }
+        public static TextBlock Muted(string text, double size = 12, double bottom = 0) { return T(text, size, false, R("Muted"), bottom); }
+        public static TextBlock Num(string text, double size = 12, Brush fg = null) { var t = new TextBlock { Text = text, FontSize = size, FontFamily = Mono }; if (fg != null) t.Foreground = fg; return t; }
+        // a heading in the console style: spaced capitals in the head font
+        public static TextBlock Caps(string text, double size = 11, Brush fg = null)
+        {
+            return new TextBlock { Text = Spaced(text.ToUpperInvariant()), FontSize = size, FontFamily = Head, Foreground = fg ?? R("Lilac"), FontWeight = FontWeights.SemiBold };
+        }
+        public static string Spaced(string s) { var sb = new System.Text.StringBuilder(); foreach (var c in s) { if (sb.Length > 0) sb.Append(' '); sb.Append(c); } return sb.ToString(); }
+        public static Button Btn(string label, Action click, bool accent = false, string tip = null)
+        {
+            var b = new Button { Content = label, Style = S(accent ? "Accent" : "Btn"), Margin = new Thickness(0, 0, 8, 0) };
+            if (tip != null) b.ToolTip = tip;
+            if (click != null) b.Click += (s, e) => click();
+            return b;
+        }
+        public static Button Danger(string label, Action click) { var b = Btn(label, click); b.Style = S("Danger"); return b; }
+        public static StackPanel Row(params UIElement[] items) { var p = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var i in items) p.Children.Add(i); return p; }
+        public static Border Card(UIElement child, double pad = 16)
+        {
+            return new Border { Child = child, Background = R("Panel"), BorderBrush = R("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3), Padding = new Thickness(pad) };
+        }
+        // a small coloured label ("Anti-cheat - leave alone", "Game", "Lowered")
+        public static Border Pill(string text, string fgKey, string bgKey)
+        {
+            return new Border { Background = R(bgKey), BorderBrush = R(fgKey), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(2), Padding = new Thickness(7, 1, 7, 2), VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock { Text = text, FontSize = 11, Foreground = R(fgKey), FontWeight = FontWeights.SemiBold } };
+        }
+        public static FrameworkElement Header(string word, double size = 20)
+        {
+            var title = new StackPanel { Orientation = Orientation.Horizontal };
+            try { title.Children.Add(new Image { Source = AppIcon(), Width = size + 8, Height = size + 8, Margin = new Thickness(0, 0, 10, 0) }); } catch { }
+            title.Children.Add(new TextBlock { Text = "HALLOW", FontSize = size, FontWeight = FontWeights.Bold, Foreground = R("AccentBrush"), VerticalAlignment = VerticalAlignment.Center, FontFamily = Head });
+            title.Children.Add(new TextBlock { Text = " " + word, FontSize = size, FontWeight = FontWeights.Light, VerticalAlignment = VerticalAlignment.Center, FontFamily = Head });
+            return title;
+        }
+        public static CheckBox Switch(string text, bool on, Action<bool> changed)
+        {
+            var c = new CheckBox { Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap }, IsChecked = on, Style = S("Switch") };
+            if (changed != null) c.Click += (s, e) => changed(c.IsChecked == true);
+            return c;
+        }
+        public static TextBox Field(string text = "", double width = double.NaN) { var t = new TextBox { Text = text, Style = S("Field") }; if (!double.IsNaN(width)) t.Width = width; return t; }
+
+        // the readable accent: a very dark theme.json accent is lightened until it reads on the panels (like Hallow Guard's console)
+        public static string Readable(string accent)
+        {
+            try
+            {
+                var c = (Color)ColorConverter.ConvertFromString(accent); var on = (Color)ColorConverter.ConvertFromString("#221C2E");
+                Func<Color, double> lum = x => { Func<byte, double> f = v => { var d = v / 255.0; return d <= 0.03928 ? d / 12.92 : Math.Pow((d + 0.055) / 1.055, 2.4); }; return 0.2126 * f(x.R) + 0.7152 * f(x.G) + 0.0722 * f(x.B); };
+                Func<Color, double> ratio = x => (Math.Max(lum(x), lum(on)) + 0.05) / (Math.Min(lum(x), lum(on)) + 0.05);
+                if (ratio(c) >= 4.6) return accent;
+                for (int i = 1; i <= 20; i++)
+                {
+                    double t = i * 0.05; var m = Color.FromRgb((byte)(c.R + (255 - c.R) * t), (byte)(c.G + (255 - c.G) * t), (byte)(c.B + (255 - c.B) * t));
+                    if (ratio(m) >= 4.6) return "#" + m.R.ToString("X2") + m.G.ToString("X2") + m.B.ToString("X2");
+                }
+            }
+            catch { }
+            return accent;
+        }
+
+        // ---- program icons (16 px), read once per file; a letter tile when there's no file or icon
+        public static bool RealIcons;   // the developer real-data snap only
+        static readonly Dictionary<string, ImageSource> icons = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+        public static ImageSource ProgramIcon(string path)
+        {
+            if (string.IsNullOrEmpty(path) || (Snap.On && !RealIcons)) return null;
+            ImageSource s; if (icons.TryGetValue(path, out s)) return s;
+            s = null;
+            try
+            {
+                if (System.IO.File.Exists(path))
+                    using (var ico = System.Drawing.Icon.ExtractAssociatedIcon(path))
+                        if (ico != null) { s = Imaging.CreateBitmapSourceFromHIcon(ico.Handle, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(16, 16)); s.Freeze(); }
+            }
+            catch { s = null; }
+            icons[path] = s; return s;
+        }
+        public static FrameworkElement Tile(string name, ImageSource img, double size = 16)
+        {
+            if (img != null) return new Image { Source = img, Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
+            var letter = string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpperInvariant();
+            return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(3), Background = R("TileBg"), VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock { Text = letter, FontSize = size * 0.62, FontWeight = FontWeights.Bold, Foreground = R("TileText"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } };
+        }
+    }
+}
