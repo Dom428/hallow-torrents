@@ -70,6 +70,10 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "unit" || only == "unit18") V18Unit();
                 if (only == null || only == "scope18") Scope18();
                 if (only == null || only == "app18") AppCopy18();
+                // 1.9: VPN on demand - auto-connect, P2P servers only, the kill switch tip (a fake Hallow VPN on a .test pipe)
+                if (only == null || only == "unit" || only == "unit19") V19Unit();
+                if (only == null || only == "vpn19") Vpn19();
+                if (only == null || only == "app19") AppCopy19();
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

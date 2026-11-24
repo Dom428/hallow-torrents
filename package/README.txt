@@ -28,6 +28,18 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.9 - VPN ON DEMAND
+- Auto-connect (on by default when Hallow VPN is installed): when there's something to download and
+  Hallow VPN is off, Hallow Torrents asks it to connect to a P2P server - without changing the server you
+  picked in Hallow VPN. Only when Hallow VPN can connect without asking Windows (IKEv2); if its next
+  connect is NordLynx, the banner says to connect from Hallow VPN. If it doesn't connect it tries again
+  after 30 s, 2 min and 5 min, then waits for you. Never while a game runs, unless you tick "also during
+  games". The VPN-lock banner shows what it's doing.
+- "P2P servers only" (off by default): torrents run only while Hallow VPN is on one of Nord's P2P
+  servers; on another server they stop and the banner offers "Switch to a P2P server". Needs Hallow VPN
+  (with your own VPN app's adapter it can't be checked and counts as off).
+- A tip on the VPN settings when Hallow VPN's kill switch is off (you can hide it).
+- The VPN requirement is unchanged and still has no off switch: these only help connect, or stop more.
 WHAT'S NEW IN 1.8
 - For Hallow Remote and Hallow Hub: a new pipe command "categories" lists your category names (for the
   phone's add-magnet picker), and searches can say who asked ("--client <id>") so two phones searching

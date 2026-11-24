@@ -39,6 +39,21 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## VPN on demand (new in 1.9)
+
+All of this happens **before** the VPN requirement, never instead of it: torrents still never run without a VPN, every socket is still bound to it, and the watchdog and leak drill are unchanged.
+
+- **Auto-connect** (Settings > VPN, on by default when Hallow VPN is installed): when there's something to download and Hallow VPN is off, Hallow Torrents asks it to connect to a **P2P server** (`connect p2p --once` - the server you picked in Hallow VPN stays picked). It only asks when Hallow VPN's status says the next connect **doesn't need Windows' permission** (IKEv2); if the next connect is NordLynx, the lock banner says *Connect the VPN from Hallow VPN (it needs Windows' permission for NordLynx)* and nothing is sent. If it doesn't connect, it tries again after **30 s, 2 min and 5 min, then stops** until you act (Connect Hallow VPN, `vpn-auto retry`, or the setting). **Never while a game runs**, unless you tick *also while a game is running*; never during the leak drill. The red VPN-lock banner shows what it's doing (asked, next try at..., needs Windows' permission, game running, stopped).
+- **P2P servers only** (off by default): torrents run only while Hallow VPN reports a P2P server (`p2p: true`). On any other server they stop exactly as if the VPN had dropped, and the banner offers **Switch to a P2P server** (the same `connect p2p --once`, with the same Windows-permission rule). With your own VPN app's adapter (e.g. the NordVPN app) Hallow Torrents can't tell which server you're on, so the option can't be ticked and counts as off.
+- **Kill switch tip:** when Hallow VPN's kill switch is off, Settings > VPN suggests turning it on in Hallow VPN (a second layer for every app); *Hide tip* hides it for good.
+- New on the pipe: `vpn-auto [on|off|games on|games off|retry]`, `p2p-only [on|off]`, `switch-p2p`; `status` adds `vpnAuto` and `p2pOnly`. Details in [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md).
+
+![Auto-connect in the lock banner](docs/vpn-auto.png)
+
+![P2P servers only](docs/vpn-p2p-hold.png)
+
+![Settings > VPN](docs/settings-vpn.png)
+
 ## For Hallow Remote and Hub (new in 1.8)
 
 - **`categories`** on the pipe answers your category names only (`ok {"categories":["Movies","TV",...],"count":N}`) - Hallow Remote's add-magnet picker uses it. Never folders or rules.
@@ -214,9 +229,10 @@ Click **Test**, then **Save**. The category is created in Hallow Torrents the fi
   - `speedtest [ubuntu|<magnet>|<path.torrent>|status|stop]`, `leak-drill [status|--wait]`, `watchdog [resume]` (1.5) - see [REMOTE-CONTRACT.md](REMOTE-CONTRACT.md); never an address
   - `nas-status` (1.6) - the Send-to-NAS queue as counts; 1.7 adds `server` (`jellyfin` / `emby` / `plex` / `none`)
   - `categories` (1.8) - your category names only; `search` / `search-add` take `--client <id>` (1.8) so each caller keeps its own result ids
+  - `vpn-auto [on|off|games on|games off|retry]`, `p2p-only [on|off]`, `switch-p2p` (1.9) - VPN on demand; `invoke switch-p2p` and the menu item *Switch to a P2P server* too
   - `open [transfers|search|rss|stats|apps|nas|proof|settings]` (`jellyfin`, `emby`, `plex` open the Media server / NAS page too)
   - `pause-all`, `resume-all`, `menu`, `invoke <id>`, `quit`
-- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`; 1.7 adds `server` inside it), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
+- `%APPDATA%\HallowTorrents\status.json` (1.2 adds `webApi`: on or off - never its address or sign-ins; 1.3 adds `indexers`: how many are switched on - never their names, addresses or keys; 1.4 adds `webUi` and `headless`; 1.5 adds `perf`, `watchdog`, `watchdogLocked`, `speedTest`, `leakDrill`, `repairedPieces`; 1.6 adds `nas`; 1.7 adds `server` inside it; 1.9 adds `vpnAuto` and `p2pOnly`), Hallow Hub's one Hallow icon, the Hallow accent and light / dark mode, crash reports kept on this PC, updates from GitHub with a checksum check.
 
 ## Good to know
 
@@ -232,5 +248,7 @@ The 1.6 tests (`TorrentsTests.exe unit16`, `nas`, `app16`) use a temp folder as 
 The 1.7 tests (`TorrentsTests.exe unit17`, `servers`, `app17`) use local Emby and Plex stand-ins on 127.0.0.1: server info (Emby's `/emby/System/Info/Public`, also when it wants the key; Plex's `/identity` without the token), Plex's library list, the debounced refresh calls (Emby `/Library/Media/Updated`; Plex one partial scan per new folder in the right library at Plex's own path), refused keys / tokens, a removed library, the token only in a header and never in nas.json in plain text, the log, a URL, status or the pipe, Plex's naming, public addresses refused, None (just copy), and 1.6 settings coming up as Jellyfin in a test copy. The only contact with the real NAS was a read-only `GET /identity` (Plex - not answering yet) and `GET /System/Info/Public` (Jellyfin).
 
 The 1.8 tests (`TorrentsTests.exe unit18`, `app18`) check `categories` (names only, never folders) and per-client search ids against the windowed test copy and the headless exe with a local Torznab stand-in: two clients' searches keep their own ids, one client can't add another's result, the shared set without `--client` still works as in 1.3, bad `--client` names are refused, and the oldest of more than 32 clients is dropped.
+
+The 1.9 tests (`TorrentsTests.exe unit19`, `vpn19`, `app19`) use a fake Hallow VPN - its status.json in the test folder and a stand-in pipe whose name ends in `.test-<folder>`, so the real Hallow VPN is never sent anything: the back-off on a made-up clock (now, 30 s, 2 min, 5 min, then stop until you act), the game hold and *also during games*, needsUac (nothing sent), not running, connecting, the leak drill, errors and no answer, P2P servers only (it can only turn an OK into a stop, never the other way), your own VPN app's adapter (P2P-only counts as off, Hallow VPN never asked), the pipe commands and status fields in the windowed test copy and the headless exe. All earlier suites, including the lock and leak tests, run unchanged.
 
 Pictures use made-up torrents.

@@ -121,6 +121,7 @@ namespace HallowTorrents
             INetworks nets = TorSettings.Fake ? (INetworks)new FakeNetworks(Path.Combine(TorSettings.Dir, "fake-adapters.txt")) : new RealNetworks();
             Watch = new VpnWatch(() => S, nets, !TorSettings.Fake);
             Watch.Changed += (o, n) => VpnChanged(n);
+            Auto.Log += Log;   // v1.9: VPN on demand
             Family.Serve("Torrents", Command);
             // v1.2: the qBittorrent-compatible Web API (off unless you turned it on, with a username and password)
             Api = new QbitApi(Core, () => S, a => RunOnUi(() => { a(); S.Fix(); S.Save(); }));
@@ -201,17 +202,42 @@ namespace HallowTorrents
             try { Core.SetVpn(n).Wait(5000); } catch (Exception e) { Log("engine: " + e.GetBaseException().Message); }
             ui.BeginInvoke(new Action(() =>
             {
-                if (was.Ok && !n.Ok && Core.Entries.Any(x => !x.UserPaused)) Notify("Torrents stopped: the VPN dropped", "Everything is stopped until your VPN is back. Nothing went out over your normal connection.");
+                if (was.Ok && !n.Ok && n.NotP2p && Core.Entries.Any(x => !x.UserPaused)) Notify("Torrents paused: not a P2P server", "Hallow VPN moved to a server that isn't for P2P. Torrents wait for a P2P server (\"P2P servers only\" is on).");
+                else if (was.Ok && !n.Ok && Core.Entries.Any(x => !x.UserPaused)) Notify("Torrents stopped: the VPN dropped", "Everything is stopped until your VPN is back. Nothing went out over your normal connection.");
                 if (n.Ok && Core.EngineUp) { KickRss(); CheckBlocklist(); }
                 WriteStatus(); var h = Ticked; if (h != null) h();
             }));
         }
         public bool Locked { get { return SnapMode ? SnapLocked : !Core.EngineUp; } }
         public bool SnapLocked;
+        // ---------------- v1.9: VPN on demand (VpnAuto.cs) - before the requirement, never instead of it
+        public VpnAuto Auto = new VpnAuto();
+        public string SnapAuto; public bool SnapNotP2p, SnapKillOff;   // --snap: a made-up auto-connect line / P2P hold / kill switch tip
+        public Dictionary<string, object> HallowStatus { get { return Watch == null ? null : Watch.Hallow; } }
+        int autoBusy; string autoKey;
+        void AutoTick()
+        {
+            if (SnapMode || Watch == null || Interlocked.Exchange(ref autoBusy, 1) == 1) return;
+            var inp = new VpnAuto.Inputs { On = VpnAuto.On(S), InGames = S.VpnAutoInGames, Source = S.VpnSource, VpnOk = Vpn.Ok, NotP2p = Vpn.NotP2p, Work = VpnAuto.Work(Core), Game = Game, Drill = Proof != null && Proof.Drill.Running };
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    inp.Hallow = Watch.Hallow; inp.HallowRunning = inp.On && inp.Source == "hallow" && !inp.VpnOk && Watch.HallowRunning;
+                    Auto.Step(DateTime.Now, inp);
+                    var k = Auto.State + "|" + Auto.Text;
+                    if (k != autoKey) { autoKey = k; ui.BeginInvoke(new Action(() => { WriteStatus(); var h = Ticked; if (h != null) h(); })); }
+                }
+                catch (Exception e) { Log("vpn auto: " + e.Message); }
+                finally { Interlocked.Exchange(ref autoBusy, 0); }
+            });
+        }
+        public string SwitchP2p() { if (SnapMode) return null; Auto.Reset(); return Auto.SwitchP2p(HallowStatus, Watch.HallowRunning); }
         public string ConnectVpn()
         {
             if (SnapMode) return null;
-            var r = Family.Send("VPN", "connect fastest", 5000);
+            Auto.Reset();   // 1.9: you acted - auto-connect starts again from try 1
+            var r = Family.Send("VPN", VpnAuto.P2pOnly(S) ? VpnAuto.Command : "connect fastest", 5000);
             if (r == null) return "Hallow VPN isn't running. Start it (or connect your own VPN app) and torrents start by themselves.";
             var e = Family.Error(r, null); return e == null ? null : "Hallow VPN: " + e;
         }
@@ -231,6 +257,7 @@ namespace HallowTorrents
             Task.Run(async () => { try { await Core.Tick().ConfigureAwait(false); } catch (Exception e) { Log("tick: " + e.Message); } })
                 .ContinueWith(t => ui.BeginInvoke(new Action(() => { ticking = false; var h = Ticked; if (h != null) h(); })));
             if (++saveCount % 15 == 0) Task.Run(() => Core.Save());
+            AutoTick();   // v1.9
         }
         int saveCount;
         void CheckGame()
@@ -562,6 +589,7 @@ namespace HallowTorrents
             d["perf"] = Core.PerfNow.Name; d["watchdog"] = Proof != null; d["watchdogLocked"] = Core.Tripped != null;
             d["speedTest"] = Proof != null && Proof.Speed.Running; d["leakDrill"] = Proof != null && Proof.Drill.Running; d["repairedPieces"] = Core.Repaired;
             d["nas"] = Nas == null ? null : Nas.Json();   // v1.6: counts only - never file names, the folder or the key
+            d["vpnAuto"] = Auto.Json(VpnAuto.On(S), S.VpnAutoInGames); d["p2pOnly"] = VpnAuto.P2pJson(S, Vpn, HallowStatus);   // v1.9
             if (TorSettings.TestDir != null) { lock (log) d["log"] = log.ToArray(); d["notifications"] = Notifications; d["boundIp"] = Core.BoundIp == null ? null : Core.BoundIp.ToString(); }
             return d;
         }
@@ -589,6 +617,7 @@ namespace HallowTorrents
             // v1.5: speedtest, leak-drill, watchdog
             var proof = Proof == null ? null : Proof.Pipe(cmd, arg, () => ResumeAfterWatchdog()); if (proof != null) { WriteStatus(); return proof; }
             if (cmd == "nas-status") return Nas == null ? "error not ready" : "ok " + Family.Json(Nas.Json());   // v1.6
+            var auto = VpnAuto.Pipe(cmd, arg, S, a => RunOnUi(() => { a(); S.Fix(); S.Save(); }), Auto, SwitchP2p, Vpn, HallowStatus); if (auto != null) { WriteStatus(); return auto; }   // v1.9
             if (TorSettings.TestDir != null && cmd.StartsWith("test-")) return OnUi(() => TestCommand(cmd, arg));
             return "error unknown command";
         }
@@ -606,6 +635,7 @@ namespace HallowTorrents
                 new Dictionary<string, object> { { "id", "-" } },
                 new Dictionary<string, object> { { "id", "add-magnet" }, { "label", "Add magnet link..." } },
                 new Dictionary<string, object> { { "id", "connect-vpn" }, { "label", "Connect Hallow VPN" }, { "enabled", Locked } },
+                new Dictionary<string, object> { { "id", "switch-p2p" }, { "label", "Switch to a P2P server" }, { "enabled", Vpn.NotP2p } },   // 1.9
                 new Dictionary<string, object> { { "id", "settings" }, { "label", "Settings" } } };
         }
         string Invoke(string id)
@@ -616,6 +646,7 @@ namespace HallowTorrents
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
                 case "add-magnet": ShowMain("transfers"); if (main != null) main.AskMagnet(); return "ok";
                 case "connect-vpn": { var e = ConnectVpn(); return e == null ? "ok" : "error " + e; }
+                case "switch-p2p": { var e = SwitchP2p(); return e == null ? "ok" : "error " + e; }   // 1.9
                 case "settings": ShowMain("settings"); return "ok";
                 case "transfers": ShowMain("transfers"); return "ok";
             }
@@ -630,7 +661,7 @@ namespace HallowTorrents
                 case "test-vpn": return "ok " + Family.Json(new Dictionary<string, object> { { "ok", Vpn.Ok }, { "ip", Vpn.Ip == null ? null : Vpn.Ip.ToString() }, { "engine", Core.EngineUp }, { "message", Vpn.Message } });
                 case "test-handler": SetHandler(arg == "on"); return "ok " + HandlerOn;
                 case "test-autostart": SetStartWithWindows(arg == "on"); return "ok " + StartsWithWindows();
-                case "test-set": { var p = arg.Split(new[] { ' ' }, 2); if (p[0] == "gamemode") S.GameMode = p[1]; else if (p[0] == "vpnsource") S.VpnSource = p[1]; else if (p[0] == "vpnadapter") S.VpnAdapter = p[1]; else return "error unknown setting"; S.Fix(); S.Save(); return "ok"; }
+                case "test-set": { var p = arg.Split(new[] { ' ' }, 2); if (p[0] == "gamemode") S.GameMode = p[1]; else if (p[0] == "vpnsource") S.VpnSource = p[1]; else if (p[0] == "vpnadapter") S.VpnAdapter = p[1]; else if (p[0] == "p2ponly") S.P2pOnly = p[1] == "on"; else return "error unknown setting"; S.Fix(); S.Save(); return "ok"; }
                 case "test-game": CheckGame(); return "ok";
             }
             return "error unknown test command";

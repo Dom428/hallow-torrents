@@ -40,7 +40,9 @@ namespace HallowTorrents.Tests
         [StructLayout(LayoutKind.Sequential)] struct IoCounters { public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes; }
         [DllImport("kernel32.dll")] static extern bool GetProcessIoCounters(IntPtr h, out IoCounters c);
         public static readonly string[] Games = { "DeltaForceClient-Win64-Shipping", "Discovery-d" };
-        public static bool GameRunning() { foreach (var g in Games) { var p = Process.GetProcessesByName(g); var any = p.Length > 0; foreach (var x in p) x.Dispose(); if (any) return true; } return false; }
+        // 1.9: HALLOW_TORRENTS_BENCH_DURING_GAMES=1 lets the small smoke run (benchsmoke) go on at BelowNormal while a game runs (the
+        // user allows work during games since 2026-11-22); the full benchmark still waits for no game
+        public static bool GameRunning() { if (Environment.GetEnvironmentVariable("HALLOW_TORRENTS_BENCH_DURING_GAMES") == "1") return false; foreach (var g in Games) { var p = Process.GetProcessesByName(g); var any = p.Length > 0; foreach (var x in p) x.Dispose(); if (any) return true; } return false; }
         static void Say(string s) { Console.WriteLine(DateTime.Now.ToString("HH:mm:ss") + " " + s); }
         static string Arg(string[] a, string n, string d) { var i = Array.IndexOf(a, n); return i >= 0 && i + 1 < a.Length ? a[i + 1] : d; }
         static int FreePort(IPAddress ip) { var l = new TcpListener(ip, 0); l.Start(); var p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p; }

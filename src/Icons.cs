@@ -25,7 +25,8 @@ namespace HallowTorrents
             { "Check my torrent IP", "magnifying-glass" }, { "Add rule", "plus" }, { "Delete", "trash-can" }, { "Show details", "eye" }, { "Update", "download" }, { "Refresh", "arrows-rotate" }, { "Clear", "xmark" },
             { "Remove and delete files", "trash-can" }, { "Add and start", "play" }, { "Add paused", "pause" },
             { "Create torrent", "file-circle-plus" }, { "Create", "file-circle-plus" }, { "Add feed", "rss" }, { "Add tracker", "plus" }, { "Move storage...", "truck-moving" }, { "Rename", "pen" },
-            { "Rename folder...", "folder-tree" }, { "Edit", "pen" }, { "Folder...", "folder-open" }, { "File...", "file-arrow-down" }, { "Update now", "arrows-rotate" }
+            { "Rename folder...", "folder-tree" }, { "Edit", "pen" }, { "Folder...", "folder-open" }, { "File...", "file-arrow-down" }, { "Update now", "arrows-rotate" },
+            { "Switch to a P2P server", "arrows-rotate" }, { "Try again now", "arrows-rotate" }, { "Hide tip", "xmark" }   // 1.9
         };
         static readonly string[][] Prefixes = { new[] { "Update to", "download" } };
         public static string ForLabel(string label)

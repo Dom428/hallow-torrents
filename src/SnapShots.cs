@@ -127,12 +127,21 @@ namespace HallowTorrents
             // the VPN is off: everything stopped, the banner with Connect
             c.SnapLocked = true; foreach (var v in c.SnapViews) { v.DownRate = 0; v.UpRate = 0; v.Seeds = 0; v.Leechs = 0; if (!v.Paused) v.State = "Waiting for VPN"; }
             w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "vpn-locked.png"), 1260, 780);
+            // v1.9: VPN on demand - auto-connect asking, the UAC case, and "P2P servers only" holding on a non-P2P server
+            c.SnapAuto = "Asked Hallow VPN to connect to a P2P server (try 1 of 4)...";
+            w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "vpn-auto.png"), 1260, 780);
+            c.SnapAuto = VpnAuto.UacText; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "vpn-auto-uac.png"), 1260, 780);
+            c.SnapAuto = null; c.SnapNotP2p = true; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "vpn-p2p-hold.png"), 1260, 780);
+            c.SnapNotP2p = false;
             // a game is running (pause) + the first-run notes
             c.SnapLocked = false; c.SnapViews = Made(); foreach (var v in c.SnapViews) { v.DownRate = 0; v.UpRate = 0; if (!v.Paused && !v.State.StartsWith("Done")) v.State = "Paused for game"; }
             c.Game = "Delta Force"; c.S.LegalSeen = false; w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "game-paused.png"), 1260, 780);
             c.S.LegalSeen = true; c.S.HandlerAsked = false; c.Game = null; c.SnapViews = Made(); w.Show("transfers"); Snap.Save(w, Path.Combine(dir, "ask-handler.png"), 1260, 780);
             c.S.HandlerAsked = true;
+            c.S.VpnAuto = true; c.SnapKillOff = true;   // 1.9: VPN on demand on, and Hallow VPN's kill switch off (the tip)
             w.Show("settings"); Snap.Save(w, Path.Combine(dir, "settings.png"), 1260, 3300);
+            Snap.Save(w, Path.Combine(dir, "settings-vpn.png"), 1260, 900);   // 1.9: the VPN section (the top of the page)
+            c.SnapKillOff = false;
             // v1.2: the Radarr / Sonarr page (made-up sign-in and addresses; nothing listens)
             c.S.ApiOn = true; c.S.WebUiOn = true; c.S.ApiUser = "radarr"; c.S.ApiPassHash = "made-up"; c.S.ApiAllow = "192.168.1.20";
             c.S.Categories.Add(new Category { Name = "radarr", SaveFolder = @"\\NAS\downloads\radarr", Naming = "keep" }); c.S.Categories.Add(new Category { Name = "tv-sonarr", SaveFolder = @"\\NAS\downloads\tv-sonarr", Naming = "keep" });

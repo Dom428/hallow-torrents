@@ -58,9 +58,23 @@ namespace HallowTorrents
             var v = Section(page, "VPN - always required", "Hallow Torrents never runs without a VPN, and there is no switch to change that. Every connection - peers, trackers, DHT, even the tracker name lookups - is bound to your VPN's address, so nothing can leave through your normal connection. If the VPN drops or changes, torrents stop within a second and start again once it's back.");
             var vs = c.SnapMode ? "Locked to NordLynx (10.5.0.2) - Hallow VPN, Netherlands #123" : c.Vpn.Ok ? "Locked to " + c.Vpn.Adapter + " (" + c.Vpn.Ip + ")" : "Stopped: " + c.Vpn.Message;
             v.Children.Add(Ui.T(vs, 12.5, true, (c.SnapMode || c.Vpn.Ok) ? Ui.R("Green") : Ui.R("Red"), 8));
+            // 1.9: the kill switch tip - only when Hallow VPN says its kill switch is off
+            var hs = c.HallowStatus; var ks = VpnAuto.Flag(hs, "killSwitch");
+            if (S.VpnSource == "hallow" && !S.KillTipDismissed && (c.SnapMode ? c.SnapKillOff : ks == false))
+            {
+                Border tip = null;
+                var hide = Ui.Btn("Hide tip", () => { S.KillTipDismissed = true; Saved(); if (tip != null) tip.Visibility = Visibility.Collapsed; }); hide.VerticalAlignment = VerticalAlignment.Center;
+                tip = Dialogs.Banner("shield-halved", "Lilac", "LilacBg", "Hallow VPN's kill switch adds a second layer; turn it on in Hallow VPN. (Hallow Torrents' own lock works without it - this blocks every app's traffic if the VPN drops.)", hide);
+                tip.Margin = new Thickness(0, 0, 0, 8); v.Children.Add(tip);
+            }
             v.Children.Add(Ui.T("Which VPN?", 12.5, true));
             StackPanel adapterBox = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
-            v.Children.Add(Choice(new[] { new[] { "hallow", "Hallow VPN (recommended)" }, new[] { "adapter", "My own VPN app (pick its adapter)" } }, S.VpnSource, id => { S.VpnSource = id; Saved(); adapterBox.Visibility = id == "adapter" ? Visibility.Visible : Visibility.Collapsed; }));
+            CheckBox p2pBox = null; TextBlock p2pNote = null;
+            v.Children.Add(Choice(new[] { new[] { "hallow", "Hallow VPN (recommended)" }, new[] { "adapter", "My own VPN app (pick its adapter)" } }, S.VpnSource, id =>
+            {
+                S.VpnSource = id; Saved(); adapterBox.Visibility = id == "adapter" ? Visibility.Visible : Visibility.Collapsed;
+                if (p2pBox != null) { p2pBox.IsEnabled = id == "hallow"; p2pBox.IsChecked = VpnAuto.P2pOnly(S); p2pNote.Visibility = id == "hallow" ? Visibility.Collapsed : Visibility.Visible; }
+            }));
             adapterBox.Visibility = S.VpnSource == "adapter" ? Visibility.Visible : Visibility.Collapsed;
             adapterBox.Children.Add(Ui.Muted("For the NordVPN app pick NordLynx (or its OpenVPN TAP adapter); WireGuard shows as your tunnel's name. Only adapters that are connected right now have an address.", 12, 6));
             List<AdapterInfo> ads = c.SnapMode ? new List<AdapterInfo> { new AdapterInfo { Id = "a", Name = "NordLynx", Description = "NordLynx Tunnel", Up = true }, new AdapterInfo { Id = "b", Name = "Ethernet", Description = "Realtek PCIe 2.5GbE", Up = true } } : SafeList();
@@ -72,6 +86,18 @@ namespace HallowTorrents
                 adWrap.Children.Add(t);
             }
             adapterBox.Children.Add(adWrap); v.Children.Add(adapterBox);
+
+            // 1.9: VPN on demand - before the requirement, never instead of it
+            v.Children.Add(Ui.T("VPN on demand", 12.5, true, null, 4));
+            var autoSw = Ui.Switch("Connect Hallow VPN by itself when there's something to download (a P2P server, without changing the server you picked in Hallow VPN)", VpnAuto.On(S), on => { S.VpnAuto = on; Saved(); c.Auto.Reset(); });
+            autoSw.Margin = new Thickness(0, 0, 0, 4); v.Children.Add(autoSw);
+            var gameSw = Ui.Switch("...also while a game is running", S.VpnAutoInGames, on => { S.VpnAutoInGames = on; Saved(); c.Auto.Reset(); });
+            gameSw.Margin = new Thickness(22, 0, 0, 4); v.Children.Add(gameSw);
+            v.Children.Add(Ui.Muted("Only when Hallow VPN can connect without asking Windows (IKEv2). If its next connect is NordLynx, Windows asks for permission - then connect from Hallow VPN yourself. If it doesn't connect it tries again after 30 s, 2 min and 5 min, then waits for you.", 12, 8));
+            p2pBox = Ui.Switch("P2P servers only - torrents run only while Hallow VPN is on one of Nord's P2P servers", VpnAuto.P2pOnly(S), on => { S.P2pOnly = on && S.VpnSource == "hallow"; Saved(); });
+            p2pBox.IsEnabled = S.VpnSource == "hallow"; p2pBox.Margin = new Thickness(0, 0, 0, 4); v.Children.Add(p2pBox);
+            p2pNote = Ui.Muted(VpnAuto.P2pAdapterNote, 12, 4); p2pNote.Visibility = S.VpnSource == "hallow" ? Visibility.Collapsed : Visibility.Visible; v.Children.Add(p2pNote);
+            v.Children.Add(Ui.Muted("On another server torrents stop as if the VPN had dropped, and the transfers page offers \"Switch to a P2P server\".", 12, 8));
             v.Children.Add(Ui.Muted("Port forwarding (UPnP / NAT-PMP) is always off: it would open a port on your home router, outside the VPN. NordVPN doesn't offer port forwarding either, so fewer peers can connect to you - downloads still work, that's normal.", 12, 8));
             var check = Ui.Btn("Check my torrent IP", () =>
             {

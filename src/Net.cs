@@ -88,6 +88,7 @@ namespace HallowTorrents
     {
         public bool Ok; public IPAddress Ip; public string Adapter, AdapterId, Server, Country, Message; public List<IPAddress> Dns = new List<IPAddress>();
         public bool HallowConnected;   // Hallow VPN says connected (even if its adapter wasn't found)
+        public bool NotP2p;            // v1.9: connected, but held by "P2P servers only" (Hallow VPN isn't on a P2P server)
         public string Key { get { return Ok ? "ok|" + Ip + "|" + AdapterId : "off|" + Message; } }
     }
 
@@ -138,6 +139,17 @@ namespace HallowTorrents
             if (pick == null) { st.Message = "Hallow VPN says it's connected, but its network adapter wasn't found, so traffic can't be locked to it. Pick the adapter in Settings > VPN."; return st; }
             if (ipText != null && IPAddress.TryParse(ipText, out want) && pick.IPv4.Contains(want)) { Fill(st, pick); st.Ip = want; } else Fill(st, pick);
             st.Ok = true; return st;
+        }
+        // ---- v1.9: "P2P servers only" - can only turn an OK into a stop, never the other way. p2pOnly = the effective setting
+        // (VpnAuto.P2pOnly: Hallow VPN as the source); hallow = its status. Anything but "p2p": true holds torrents.
+        public static VpnState P2pGate(VpnState st, bool p2pOnly, Dictionary<string, object> hallow)
+        {
+            if (st == null || !st.Ok || !p2pOnly) return st;
+            object v; if (hallow != null && hallow.TryGetValue("p2p", out v) && v is bool && (bool)v) return st;
+            var srv = st.Server ?? Str(hallow, "server");
+            var held = new VpnState { Ok = false, NotP2p = true, HallowConnected = st.HallowConnected, Server = st.Server, Country = st.Country, Adapter = st.Adapter, AdapterId = st.AdapterId,
+                Message = "Hallow VPN is connected to " + (srv ?? "a server") + ", which isn't a P2P server - torrents wait for a P2P server (\"P2P servers only\" is on)." };
+            return held;
         }
         static void Fill(VpnState st, AdapterInfo a)
         {
@@ -483,6 +495,8 @@ namespace HallowTorrents
         public VpnState Current = new VpnState { Message = "Checking the VPN..." };
         public event Action<VpnState, VpnState> Changed;   // (old, new) - on the watch thread
         Dictionary<string, object> pipeStatus; DateTime pipeAt = DateTime.MinValue; bool? pipeAlive;
+        public volatile Dictionary<string, object> Hallow;   // v1.9: Hallow VPN's latest status (pipe or status.json; null = none) for VPN on demand
+        public bool HallowRunning { get { return checkPipe ? pipeAlive == true : Family.Running("VPN"); } }   // tests (fake mode): the .test pipe
         public VpnWatch(Func<TorSettings> settings, INetworks nets, bool checkPipe) { this.settings = settings; this.nets = nets; this.checkPipe = checkPipe; }
         public void Start() { new Thread(Loop) { IsBackground = true, Name = "vpn watch" }.Start(); if (checkPipe) new Thread(PipeLoop) { IsBackground = true, Name = "vpn pipe" }.Start(); }
         public void Dispose() { stop = true; }
@@ -506,7 +520,8 @@ namespace HallowTorrents
                 if (checkPipe) { alive = pipeAlive; if (pipeStatus != null && (DateTime.UtcNow - pipeAt).TotalSeconds < 7) h = pipeStatus; }
             }
             List<AdapterInfo> a; try { a = nets.List(); } catch { a = new List<AdapterInfo>(); }
-            return Net.Decide(s.VpnSource, s.VpnAdapter, h, alive, a);
+            Hallow = h;
+            return Net.P2pGate(Net.Decide(s.VpnSource, s.VpnAdapter, h, alive, a), VpnAuto.P2pOnly(s), h);   // 1.9: P2P-only can only add a stop
         }
         void Loop()
         {

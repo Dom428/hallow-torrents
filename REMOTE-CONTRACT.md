@@ -27,7 +27,7 @@ Torrents only ever run over the VPN. A torrent added or resumed from a phone **w
 | `pause-all` / `resume-all` | `ok` |
 | `search <words> [--n 10] [--cat movies\|tv\|music\|games\|software\|books\|other]` | `ok {search}` - see below. `show s01e02` searches that episode, `tt0111161` a movie by IMDb id. Can take up to ~20 s (each indexer has a 15 s timeout): use a 45 s pipe timeout. `error waiting for the VPN - searches only go out over it (nothing was sent)` while locked and no local indexer manager is set up. |
 | `search-add <id> [--category <name>]` | the same answer as `add`. `<id>` comes from the last `search` (ids live until the next search). **1.8:** add `--client <id>` to both `search` and `search-add` so other callers can't replace your ids - see "Categories and per-client search ids (1.8)" below. |
-| `menu` / `invoke <id>` | Hallow Hub's generic tray menu (`pause-all`, `resume-all`, `add-magnet`, `connect-vpn`, `settings`) |
+| `menu` / `invoke <id>` | Hallow Hub's generic tray menu (`pause-all`, `resume-all`, `add-magnet`, `connect-vpn`, `settings`; 1.9 adds `switch-p2p`) |
 | `open [transfers\|search\|rss\|stats\|apps\|settings]` | opens the window on the PC (`error` on the headless copy) - not for phones |
 
 ### `list`
@@ -160,3 +160,41 @@ Before 1.8 every caller shared one set of result ids: a search from a second pho
 - **Without `--client` nothing changes**: those callers share the default set, exactly as 1.3 - 1.7 (so an older Remote still works, with the old collision between such callers).
 - The PC's own Search page and each signed-in web-interface session now have their own sets too, so they no longer wipe a phone's results (and a phone's search no longer touches theirs).
 - `--client` can come anywhere after the words; it's never sent to an indexer.
+
+## VPN on demand (1.9)
+
+Added only - nothing above changes, and none of this relaxes the lock: torrents still never run without the VPN. Check `ping`'s `version` >= 1.9 first (older copies answer `error unknown command`).
+
+### Commands
+
+| Command | Answer |
+|---|---|
+| `vpn-auto` (or `vpn-auto status`) | `ok {vpnAuto}` - see below |
+| `vpn-auto on` / `vpn-auto off` | turns auto-connect on / off (saved), starts the tries again; `ok {vpnAuto}` |
+| `vpn-auto games on` / `vpn-auto games off` | "also while a game is running"; `ok {vpnAuto}` |
+| `vpn-auto retry` | "the user acted": the back-off starts again from try 1 (asks at the next second if it may); `ok {vpnAuto}` |
+| `p2p-only` (or `p2p-only status`) | `ok {p2pOnly}` - see below |
+| `p2p-only on` / `p2p-only off` | "P2P servers only" (saved). With the adapter source (your own VPN app): `error "P2P servers only" needs Hallow VPN: ...` and nothing changes |
+| `switch-p2p` | asks Hallow VPN `connect p2p --once` -> `ok`; `error Connect the VPN from Hallow VPN (it needs Windows' permission for NordLynx).` when Hallow VPN's next connect needs UAC (nothing is sent), `error Hallow VPN isn't running...`, or `error Hallow VPN: <its error>` |
+| `menu` / `invoke switch-p2p` | the menu gains `{"id":"switch-p2p","label":"Switch to a P2P server","enabled":<held by P2P-only>}` |
+
+`connect-vpn` (menu / web interface) is unchanged, except that it sends `connect p2p --once` instead of `connect fastest` while "P2P servers only" is on, and it counts as "the user acted" (the back-off starts again).
+
+### `vpnAuto` (in `status`, status.json and `vpn-auto`)
+
+```json
+{"on":true,"inGames":false,"state":"waiting","tries":1,"maxTries":4,"nextTry":"2026-11-23T14:32:10","message":"Hallow VPN didn't connect yet - trying again at 14:32:10 (try 2 of 4)."}
+```
+
+- `on`: the effective setting (on by default when Hallow VPN is installed). `inGames`: also while a game runs.
+- `state`: `off` (setting off, or your own VPN app), `idle` (nothing to run, or the leak drill is running), `connected`, `asked`, `waiting` (back-off), `connecting` (Hallow VPN says so), `uac` (its next connect needs Windows' permission - connect from Hallow VPN), `game`, `not-running`, `stopped` (4 tries without a connection - waits until the user acts).
+- `tries` / `maxTries`: tries since the VPN was last up. Tries go now, after 30 s, 2 min and 5 min. `nextTry`: local time or `null`. `message`: the line the app shows under its lock banner (`null` = nothing to say).
+- What is sent to Hallow VPN is always exactly `connect p2p --once`, and only when its status has `needsUac.connect == false`.
+
+### `p2pOnly` (in `status`, status.json and `p2p-only`)
+
+```json
+{"on":true,"applies":true,"held":true,"serverP2p":false,"note":null}
+```
+
+- `on`: the saved setting. `applies`: it's in force (only with Hallow VPN as the source). `held`: torrents are stopped because Hallow VPN isn't on a P2P server (then `vpnLocked` is `true` as well). `serverP2p`: Hallow VPN's own `p2p` (`null` when unknown / not Hallow VPN). `note`: why it doesn't apply (your own VPN app), else `null`.

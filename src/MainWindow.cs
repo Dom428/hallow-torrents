@@ -167,16 +167,25 @@ namespace HallowTorrents
         void Banners()
         {
             var vpnOk = !c.Locked; var game = c.SnapMode ? c.Game : c.Game;
-            var key = vpnOk + "|" + (c.SnapMode ? "" : c.Vpn.Key + c.Vpn.Server) + "|" + game + "|" + c.S.GameMode + "|" + c.S.LegalSeen + "|" + c.S.HandlerAsked + "|" + c.S.VpnSource + "|" + TrippedText;
+            var key = vpnOk + "|" + (c.SnapMode ? "" : c.Vpn.Key + c.Vpn.Server) + "|" + game + "|" + c.S.GameMode + "|" + c.S.LegalSeen + "|" + c.S.HandlerAsked + "|" + c.S.VpnSource + "|" + TrippedText + "|" + AutoLine + "|" + NotP2p;
             if (key == bannerKey) return; bannerKey = key;
             bannerPanel.Children.Clear();
             var wd = WatchdogBanner(); if (wd != null) bannerPanel.Children.Add(wd);   // v1.5: the socket watchdog stopped everything
-            if (!vpnOk && wd == null)
+            if (!vpnOk && wd == null && NotP2p)
             {
-                var b = Ui.Row(Ui.Btn("Connect Hallow VPN", () => { var e = c.ConnectVpn(); Say(e ?? "Asked Hallow VPN to connect to the fastest server..."); }, true), Ui.Btn("VPN settings", () => Show("settings")));
+                // 1.9: "P2P servers only" holds torrents on a server that isn't for P2P
+                var b = Ui.Row(Ui.Btn("Switch to a P2P server", () => { var e = c.SwitchP2p(); Say(e ?? "Asked Hallow VPN to connect to a P2P server..."); }, true), Ui.Btn("VPN settings", () => Show("settings")));
+                b.VerticalAlignment = VerticalAlignment.Center;
+                var msg = c.SnapMode ? "Hallow VPN is connected to United States #5838, which isn't a P2P server." : c.Vpn.Message;
+                bannerPanel.Children.Add(Dialogs.Banner("lock", "Amber", "AmberBg", msg + " Everything is stopped - nothing goes out until you're on a P2P server.", b));
+            }
+            else if (!vpnOk && wd == null)
+            {
+                var b = Ui.Row(Ui.Btn("Connect Hallow VPN", () => { var e = c.ConnectVpn(); Say(e ?? (VpnAuto.P2pOnly(c.S) ? "Asked Hallow VPN to connect to a P2P server..." : "Asked Hallow VPN to connect to the fastest server...")); }, true), Ui.Btn("VPN settings", () => Show("settings")));
                 b.VerticalAlignment = VerticalAlignment.Center;
                 var msg = c.SnapMode ? "Hallow VPN isn't connected." : c.Vpn.Message;
-                bannerPanel.Children.Add(Dialogs.Banner("lock", "Red", "RedBg", "Connect your VPN to torrent. Everything is stopped - nothing goes out over your normal connection. " + msg, b));
+                var auto = AutoLine;   // 1.9: what auto-connect is doing
+                bannerPanel.Children.Add(Dialogs.Banner("lock", "Red", "RedBg", "Connect your VPN to torrent. Everything is stopped - nothing goes out over your normal connection. " + msg + (auto != null ? "\n" + auto : ""), b));
             }
             else if (wd == null)
             {
@@ -197,6 +206,9 @@ namespace HallowTorrents
                 bannerPanel.Children.Add(Dialogs.Banner("magnet", "Lilac", "LilacBg", "Open .torrent files and magnet links with Hallow Torrents? (Only for you - you can change it in Settings.)", b));
             }
         }
+        // 1.9: VPN on demand - the auto-connect line under the lock banner, and the P2P hold
+        string AutoLine { get { return c.SnapMode ? c.SnapAuto : c.Auto.Text; } }
+        bool NotP2p { get { return c.SnapMode ? c.SnapNotP2p : c.Vpn.NotP2p; } }
         public const string Legal = "Torrenting itself is legal. Downloading or sharing copyrighted material without permission isn't. The VPN lock is for privacy - it doesn't change what the law allows.";
         bool Match(TorrentView v)
         {

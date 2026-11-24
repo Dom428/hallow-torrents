@@ -85,6 +85,11 @@ namespace HallowTorrents
         // ---- VPN (always required - there is no setting to turn it off)
         [DataMember] public string VpnSource = "hallow";    // "hallow" = Hallow VPN; "adapter" = the adapter below
         [DataMember] public string VpnAdapter;               // adapter id (or name) for "adapter"
+        // v1.9: VPN on demand (VpnAuto.cs) - all of it happens before the requirement, which stays absolute
+        [DataMember] public bool? VpnAuto;                   // ask Hallow VPN to connect when there's something to run (null = on when Hallow VPN is installed)
+        [DataMember] public bool VpnAutoInGames;             // ...also while a game runs
+        [DataMember] public bool P2pOnly;                    // torrents only while Hallow VPN reports a P2P server (off with your own VPN app)
+        [DataMember] public bool KillTipDismissed;           // the "turn on Hallow VPN's kill switch" tip was dismissed
 
         // ---- games
         [DataMember] public string GameMode = "pause";      // "off" / "pause" / "limit"
