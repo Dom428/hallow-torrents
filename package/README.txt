@@ -28,6 +28,9 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.11 - PAUSE WHEN FINISHED
+- Settings > Downloads > "Pause torrents when they finish downloading (don't seed)" - off by default. Resume one to seed after all.
+
 WHAT'S NEW IN 1.10 - MAGNETS STUCK ON "GETTING INFO"
 - A magnet link that finds no one in 75 seconds gets well-known public trackers added (after its own) and asks again - through the VPN only, like everything else.
 - Settings > "Add public trackers to magnet links that find no one" (on) turns it off.

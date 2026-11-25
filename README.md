@@ -39,6 +39,12 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Pause when finished (new in 1.11)
+
+**Settings > Downloads > "Pause torrents when they finish downloading (don't seed)"** (off by default): a torrent is paused as
+soon as it has finished - after Hallow Torrents' own full recheck of the files - instead of seeding. Resume it to seed after all
+(it isn't paused again). Torrents you made yourself and ones you told to seed past their limit aren't paused.
+
 ## Magnets stuck on "Getting info" (new in 1.10)
 
 A magnet link has no file list until a peer sends it, and it finds peers only through its own trackers and DHT. When one sits on

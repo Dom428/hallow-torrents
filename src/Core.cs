@@ -400,7 +400,9 @@ namespace HallowTorrents
                         // downloaded again. "v14" (the benchmark's 1.4 baseline) skips it, like 1.4 did.
                         bool verified; lock (lk) verified = verifiedIds.Contains(kv.Key);
                         if (!verified && !x.Created && S.Perf != "v14") { StartVerify(x, m); continue; }
-                        x.CompletedAt = Family.Time(DateTime.Now); L("complete " + x.Id); Save();
+                        x.CompletedAt = Family.Time(DateTime.Now); L("complete " + x.Id);
+                        if (S.PauseWhenDone && !x.Created && !x.NoLimit) { x.UserPaused = true; L("paused when done " + x.Id); }   // 1.11: pause instead of seeding
+                        Save();
                         var h = Completed; if (h != null) try { h(x); } catch { }
                     }
                     if (m.State == TorrentState.Error && m.Error != null) LastError = m.Error.Exception != null ? m.Error.Exception.Message : m.Error.Reason.ToString();

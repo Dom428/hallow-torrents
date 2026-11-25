@@ -116,6 +116,7 @@ namespace HallowTorrents
             rf.LostFocus += (s, e) => { double x; if (double.TryParse(rf.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x) && x >= 0 && x < 1000) { S.RatioLimit = x; Saved(); } };
             d.Children.Add(Dialogs.Labeled("Stop seeding at ratio", rf));
             d.Children.Add(Dialogs.Labeled("...or after minutes", NumField(S.SeedMinutes, x => { S.SeedMinutes = x; Saved(); })));
+            d.Children.Add(Ui.Switch("Pause torrents when they finish downloading (don't seed)", S.PauseWhenDone, on => { S.PauseWhenDone = on; Saved(); }));   // 1.11
             d.Children.Add(Ui.Muted("0 = no limit. Categories can have their own ratio goal. Resuming a torrent that reached its limit lets it seed on.", 12, 6));
             d.Children.Add(Ui.Switch("Show the Add window for links from the browser and double-clicked .torrent files", S.AskOnAdd, on => { S.AskOnAdd = on; Saved(); }));
             d.Children.Add(Dialogs.Labeled("Watch folder", FolderField(S.WatchFolder, p => { S.WatchFolder = p; Saved(); })));

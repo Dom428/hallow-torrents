@@ -75,6 +75,7 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "vpn19") Vpn19();
                 if (only == null || only == "app19") AppCopy19();
                 if (only == null || only == "app110") AppCopy110();   // 1.10: magnets stuck on Getting info
+                if (only == null || only == "pause111") PauseDone111().Wait();   // 1.11: pause when finished
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

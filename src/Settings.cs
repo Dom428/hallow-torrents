@@ -65,6 +65,7 @@ namespace HallowTorrents
         [DataMember] public int UpKBps;
         [DataMember] public double RatioLimit = 2.0;   // stop seeding at this ratio (0 = never)
         [DataMember] public int SeedMinutes;           // stop seeding after this long (0 = never)
+        [DataMember] public bool PauseWhenDone;        // 1.11: pause a torrent as soon as it has finished downloading (no seeding); off by default
         [DataMember] public bool AskOnAdd = true;      // the Add window for links from the browser / double-clicks
         [DataMember] public string WatchFolder;        // .torrent files dropped here are added
         [DataMember] public List<Category> Categories;
