@@ -140,7 +140,7 @@ namespace HallowTorrents
             rows.Clear(); bannerKey = null;
             var dp = new DockPanel { Margin = new Thickness(20, 16, 20, 12) };
             var top = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
-            var acts = Ui.Row(Ui.Btn("Add torrent file", AskFile, true), Ui.Btn("Add magnet link", AskMagnet), Ui.Btn("Create torrent", AskCreate), Ui.Btn("Pause all", () => { if (!c.SnapMode) c.Core.PauseAll(); Refresh(); }), Ui.Btn("Resume all", () => { if (!c.SnapMode) c.Core.ResumeAll(); Refresh(); }));
+            var acts = Ui.Row(Ui.Btn("Add torrent file", AskFile, true), Ui.Btn("Add magnet link", AskMagnet), Ui.Btn("Create torrent", AskCreate), Ui.Btn("Pause all", () => { if (!c.SnapMode) c.Core.PauseAll(); Refresh(); }), Ui.Btn("Resume all", () => { if (!c.SnapMode) c.Core.ResumeAll(); Refresh(); }), Ui.Btn("Remove all", AskRemoveAll));   // 1.12: Remove all
             top.Children.Add(acts);
             DockPanel.SetDock(top, Dock.Top); dp.Children.Add(top);
             bannerPanel = new StackPanel(); DockPanel.SetDock(bannerPanel, Dock.Top); dp.Children.Add(bannerPanel);

@@ -164,6 +164,7 @@ namespace HallowTorrents
             Snap.Save(Dialogs.RuleWindow(c, c.Rss.Data.Rules[0], null), Path.Combine(dir, "dialog-rule.png"), 700, 0);
             Snap.Save(Dialogs.RenameFolderWindow(new List<string> { "Night.Sky.S01E02.720p.WEB", "Night.Sky.S01E02.720p.WEB\\Sample" }, null), Path.Combine(dir, "dialog-rename-folder.png"), 560, 0);
             Snap.Save(Dialogs.RemoveWindow("Sintel.2010.4K", null), Path.Combine(dir, "dialog-remove.png"), 470, 0);
+            Snap.Save(Dialogs.RemoveAllWindow(5, 4, null), Path.Combine(dir, "dialog-remove-all.png"), 480, 0);   // 1.12
             Snap.Save(Dialogs.LimitsWindow("Night.Sky.S01E02.720p.WEB", 2000, 100, null), Path.Combine(dir, "dialog-limits.png"), 420, 0);
             Snap.Save(CrashNotice.Make(Path.Combine(dir, "example.txt")), Path.Combine(dir, "crash.png"), 440, 0);
         }

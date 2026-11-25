@@ -605,6 +605,7 @@ namespace HallowTorrents
                 case "add": { var direct = RemoteApi.TakeDirect(ref arg); if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>] [--direct]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1], direct)); }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
+                case "remove-all": { if (!arg.Contains("--yes")) return "error usage: remove-all --yes [--finished] [--files] (files go to the Recycle Bin)"; var ra = Core.RemoveAll(arg.Contains("--finished"), arg.Contains("--files")).Result; WriteStatus(); return "ok " + Family.Json(new Dictionary<string, object> { { "removed", ra.Item1 }, { "problem", ra.Item2 } }); }   // 1.12
                 case "search": return PipeSearch(arg);
                 case "search-add": return PipeSearchAdd(arg);
                 case "categories": return OnUi(() => RemoteApi.Categories(S.Categories.ToList()));   // 1.8

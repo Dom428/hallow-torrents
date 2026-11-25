@@ -28,6 +28,9 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.12 - REMOVE ALL
+- A Remove all button next to Pause all / Resume all. It asks first: everything or only the finished ones, and whether the files go to the Recycle Bin (by default they stay).
+
 WHAT'S NEW IN 1.11 - PAUSE WHEN FINISHED
 - Settings > Downloads > "Pause torrents when they finish downloading (don't seed)" - off by default. Resume one to seed after all.
 

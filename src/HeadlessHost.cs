@@ -228,6 +228,7 @@ namespace HallowTorrents
                     }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";
                 case "resume-all": Core.ResumeAll(); WriteStatus(); return "ok";
+                case "remove-all": { if (!arg.Contains("--yes")) return "error usage: remove-all --yes [--finished] [--files] (files go to the Recycle Bin)"; var ra = Core.RemoveAll(arg.Contains("--finished"), arg.Contains("--files")).Result; WriteStatus(); return "ok " + Family.Json(new Dictionary<string, object> { { "removed", ra.Item1 }, { "problem", ra.Item2 } }); }   // 1.12
                 case "search":
                     {
                         string cerr; var client = RemoteApi.TakeClient(ref arg, out cerr); if (cerr != null) return "error " + cerr;   // 1.8

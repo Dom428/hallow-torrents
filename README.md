@@ -39,6 +39,12 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Remove all (new in 1.12)
+
+**Remove all** sits next to Pause all and Resume all. It asks first: every torrent, or **only the finished ones**, and whether
+their files go to the **Recycle Bin** too (never a permanent delete). By default the files stay where they are. Hallow Remote
+can use the pipe's `remove-all --yes [--finished] [--files]`.
+
 ## Pause when finished (new in 1.11)
 
 **Settings > Downloads > "Pause torrents when they finish downloading (don't seed)"** (off by default): a torrent is paused as

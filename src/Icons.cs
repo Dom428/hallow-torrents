@@ -18,7 +18,7 @@ namespace HallowTorrents
 
         // exact label -> icon
         static readonly Dictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
-            { "Add torrent file", "file-arrow-down" }, { "Add magnet link", "magnet" }, { "Pause all", "pause" }, { "Resume all", "play" }, { "Pause", "pause" }, { "Resume", "play" },
+            { "Add torrent file", "file-arrow-down" }, { "Add magnet link", "magnet" }, { "Pause all", "pause" }, { "Resume all", "play" }, { "Remove all", "trash-can" }, { "Pause", "pause" }, { "Resume", "play" },
             { "Remove", "trash-can" }, { "Open folder", "folder-open" }, { "Move up", "arrow-up" }, { "Move down", "arrow-down" }, { "Force recheck", "arrows-rotate" }, { "Scan again", "shield-halved" },
             { "Send to library", "share-from-square" }, { "Connect Hallow VPN", "lock" }, { "VPN settings", "gear" }, { "Browse...", "folder-open" }, { "Set", "check" }, { "Save", "check" }, { "OK", "check" },
             { "Cancel", "xmark" }, { "Add", "plus" }, { "Yes, use Hallow Torrents", "check" }, { "Not now", "xmark" }, { "Got it", "check" }, { "Check for updates", "arrows-rotate" }, { "Open data folder", "folder-open" },
