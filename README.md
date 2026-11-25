@@ -39,6 +39,32 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Speed pass (new in 1.13)
+
+Measured on the local benchmark only (loopback swarms on this PC, Hallow's engine bound to the stand-in VPN address - **no internet**):
+
+- **"Finished" sooner.** The 1.5 recheck of every piece before a download counts as finished stays, but it now starts the moment the engine has the last piece (not at the next 1-second tick), hashes on several threads straight from the files, and a good result marks the download finished at once. Only if it finds a bad piece does MonoTorrent's own recheck run and fetch that piece again (it still happens: in 2 of 3 runs of the 2,000-file test on this PC). With 2,000 small files the time from the last byte to "finished" fell from 7-11 s to about 1.3-3 s; with one 1 GB file from about 5 s to about 3 s.
+- **More connection attempts at once** (Balanced 16 -> 48, Max speed 24 -> 96, Light 6 -> 16, gaming 4 -> 8). With 60 dead peers listed before the real ones (what trackers and DHT often hand out) the first byte came after 0.8 s instead of 2.9 s.
+- **More peers per torrent** (Balanced 100 -> 200, 500 in all; Max speed 400 / 800). With 150 slow peers (320 KB/s each) a download ran at 42 MB/s instead of 29 MB/s. It also matters with many dead peers: with 150 dead peers listed first, 1.12 never reached the six real ones (stuck at 0%), 1.13 finished every time.
+- **A MonoTorrent crash fixed** (found by the benchmark): with many peers connecting at the same moment, MonoTorrent 3.0.2's peer-exchange bookkeeping could throw on a background thread and **close the whole app** (4 of 8 runs with 150 peers and 200 per torrent; possible with 100 per torrent too, only rarer). Hallow now hands those two events over one at a time: 0 crashes in 12 runs of the same test, and none in any later run.
+- No change needed: the per-second tick, the socket watchdog (one look at Windows' tables takes about 0.5 ms, every 3 s) and the status file cost nothing measurable. A 64 MB disk cache instead of 32, 1,024 open files instead of 256, 4 / 8 / 16 upload slots and a 5 s instead of 10 s connect timeout made no difference in these tests, so they stay as they were.
+
+Medians of 3 runs (5 for the 150-peer row), 1.12 Balanced -> 1.13 Balanced: average speed / time to the last byte / time to "finished" (after the recheck):
+
+| Set-up | 1.12 | 1.13 |
+|---|---|---|
+| wan (4 seeders + 2 leechers, 40 ms, 6 MB/s each), 1 GB | 23.0 MB/s, 44.6 s, finished 49.6 s | 22.9 MB/s, 44.8 s, **finished 47.7 s** |
+| wan, 2,000 files (251 MB) | 21.3 MB/s, 11.8 s, finished 19.4 s | 21.3 MB/s, 11.8 s, **finished 13.1 s** |
+| crowd (80 peers, 320 KB/s each), 1 GB | 23.8 MB/s, 43.0 s, finished 49.6 s | 23.8 MB/s, 43.0 s, **finished 46.1 s** |
+| dead (wan behind 60 dead peers), 1 GB | 21.7 MB/s, 47.1 s, first byte 2.9 s, finished 52.7 s | **22.8 MB/s, 45.0 s, first byte 0.8 s, finished 47.4 s** |
+| dead, 2,000 files | 17.8 MB/s, 14.1 s, finished 21.2 s | **21.3 MB/s, 11.8 s, finished 13.1 s** |
+| lan (no limits), 1 GB | 88.5 MB/s, 11.6 s, finished 16.4 s | 90.6 MB/s, 11.3 s, **finished 14.4 s** |
+| lan, 2,000 files | 47.9 MB/s, 5.2 s, finished 16.3 s | 48.1 MB/s, 5.2 s, **finished 8.1 s** |
+| 150 peers at 320 KB/s each, 512 MB | 28.7 MB/s, 17.8 s, finished 21.4 s | **42.1 MB/s, 12.2 s, finished 14.4 s** |
+| wan behind 150 dead peers, 512 MB | **stuck at 0%** (2 of 2 tries) | 20.6 MB/s, 24.9 s, finished 26.2 s (3 of 3) |
+
+When the peers' own upload is the limit (wan, crowd) nothing on our side can download faster - the gain there is the earlier "finished". **uTP is still not possible:** MonoTorrent 3.0.2 has no uTP at all (TCP only), so peers that only speak uTP, or can only be reached through it, stay out of reach; that and libtorrent's tuning are what qBittorrent still has over us on the internet (see *Honest limits* below). Every socket is still bound to the VPN address; the watchdog, kill switch, leak drill and VPN lock are unchanged. `TorrentsTests.exe bench --scen dead [--dead 60]` runs the new dead-peer set-up.
+
 ## Remove all (new in 1.12)
 
 **Remove all** sits next to Pause all and Resume all. It asks first: every torrent, or **only the finished ones**, and whether
@@ -117,7 +143,7 @@ Finished downloads can go straight to the **Jellyfin library on your NAS** - the
 
 **The goal:** never leak, and be as good as NordVPN + qBittorrent. The VPN lock was already strict; 1.5 adds proof that it holds, a watchdog behind it, and faster defaults measured on a benchmark.
 
-- **Performance profiles** (Settings > **Performance**): **Balanced** (default), **Max speed**, **Light**, plus *Advanced numbers* (peers at once, per torrent, connecting at once, disk cache, upload slots, open files; 0 = the profile's). Balanced allows 300 peers (100 per torrent, 1.4 had 150 / 60), 16 connection attempts at once (8), a 32 MB disk cache (5 MB), 256 open files and 3 duplicate requests per block in end-game mode (2). While a game runs and *While you play* is set to **Limit the speed**, a small gaming profile (50 peers, 4 MB cache, 3 upload slots) is used by itself; with **Pause all** nothing runs anyway. Changes apply straight away, also to running torrents. **Only numbers change - every socket still comes from the same VPN-bound code**, and the profile can't turn anything off.
+- **Performance profiles** (Settings > **Performance**): **Balanced** (default), **Max speed**, **Light**, plus *Advanced numbers* (peers at once, per torrent, connecting at once, disk cache, upload slots, open files; 0 = the profile's). Balanced allows 300 peers (100 per torrent, 1.4 had 150 / 60; **1.13: 500 / 200**), 16 connection attempts at once (8; **1.13: 48**), a 32 MB disk cache (5 MB), 256 open files and 3 duplicate requests per block in end-game mode (2). While a game runs and *While you play* is set to **Limit the speed**, a small gaming profile (50 peers, 4 MB cache, 3 upload slots) is used by itself; with **Pause all** nothing runs anyway. Changes apply straight away, also to running torrents. **Only numbers change - every socket still comes from the same VPN-bound code**, and the profile can't turn anything off.
 - **Every finished download is rechecked before it counts as finished** (fix): the benchmark caught MonoTorrent 3.0.2 reporting a torrent with many small files complete while a 16-32 KB block on disk had never been written (zeros) - in roughly 1 in 3 runs of the 2,000-file test, **with 1.4's settings too**. 1.5 rechecks every piece on disk when the engine says "done" and downloads any bad piece again (status.json `repairedPieces` counts them). It costs one read of the download (about 7 s for 2 GB). Also fixed: stopping the engine (VPN drop, quit) no longer cuts off data that was still being written from the cache - network first, then up to 30 s for the disk.
 - **Prefer encryption** now encrypts the handshake first and uses full-stream RC4 only when the other side asks (MonoTorrent's and qBittorrent's default) - the same peers connect, with **about a quarter less CPU** than 1.4's full-RC4-first order in the benchmark. *Require encryption* is unchanged. Everything is inside the VPN tunnel either way.
 - **Socket watchdog** (always on, no switch): every 3 seconds it reads Hallow Torrents' **own rows in Windows' TCP and UDP tables** (IPv4 and IPv6). Allowed: the VPN address (and one it was bound to in the last 2 minutes - a socket on a vanished adapter can't send), loopback, the Radarr / Sonarr Web API on the one address you picked while it runs, your own Prowlarr / Jackett at a private address (1.4's exception) and the GitHub update check - those two now register their own sockets with the watchdog before connecting. **Anything else** - your normal connection, 0.0.0.0, IPv6 - **stops every torrent at once** and shows a red alert; torrents stay stopped until you click *I've checked - resume*. Defence in depth: with the binding working it never fires.
@@ -156,7 +182,9 @@ qBittorrent runs on libtorrent (C++); Hallow Torrents on MonoTorrent 3.0.2 (C#).
 
 - **No uTP** in MonoTorrent - only TCP peers. Some peers (mostly behind strict NATs, or that only speak uTP) won't connect.
 - **More CPU:** about 23-37 CPU-seconds per GB in the 1.5 benchmark (libtorrent typically needs a fraction of that). On a 12-core PC it's a few percent of the CPU; the gaming profile and game pause keep it out of your way.
-- **Piece verification is single-threaded** (~290 MB/s here: 7.2 s for 2 GB); libtorrent hashes on several threads.
+- **Piece verification is single-threaded** in MonoTorrent (~290 MB/s here: 7.2 s for 2 GB); libtorrent hashes on several threads. (1.13: Hallow's own recheck before "finished" hashes on several threads; MonoTorrent's is only used when a piece is bad.)
+- **Silent peers stay connected:** a peer that accepts the connection but never answers the handshake keeps its slot in MonoTorrent 3.0.2 (75 such peers were held for minutes in the 1.13 benchmark); libtorrent drops them after a timeout. 1.13's larger per-torrent limit leaves room around them, it doesn't drop them.
+- **Connection pacing:** MonoTorrent tries new peers on its own half-second tick, limited by "connecting at once"; libtorrent paces about 30 new attempts per second.
 - **Not adjustable in 3.0.2:** the request queue depth per peer (MonoTorrent sizes it by itself), tracker and DHT announce intervals (the tracker's interval is used), file preallocation / sparse files. Choke / unchoke is tuned only through upload slots.
 - **No port forwarding** through NordVPN (it doesn't offer it), so incoming connections are rare - true for qBittorrent over NordVPN too.
 ## Search (new in 1.3)

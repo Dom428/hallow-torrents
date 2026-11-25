@@ -35,7 +35,7 @@ namespace HallowTorrents.Tests
             Environment.SetEnvironmentVariable("HALLOW_TORRENTS_TESTDIR", Dir);
             var only = args.FirstOrDefault(a => !a.StartsWith("-"));
             // 1.5: the local speed benchmark (Bench15.cs) - not part of the suite (the suite runs a small smoke version: benchsmoke)
-            if (only == "bench-client") return Bench.Client(args);
+            if (only == "bench-client") { var bc = Bench.Client(args); try { Directory.Delete(Dir, true); } catch { } return bc; }   // 1.13: no empty test folder left per benchmark run
             if (only == "bench") { var code = Bench.Orchestrate(args); try { Directory.Delete(Dir, true); } catch { } return code; }
             try
             {
@@ -77,6 +77,7 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "app110") AppCopy110();   // 1.10: magnets stuck on Getting info
                 if (only == null || only == "pause111") PauseDone111().Wait();   // 1.11: pause when finished
                 if (only == null || only == "removeall112") RemoveAll112().Wait();   // 1.12: Remove all
+                if (only == null || only == "speed113") Speed113().Wait();   // 1.13: speed pass (multi-threaded recheck, finished without waiting for a tick)
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

@@ -28,6 +28,12 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.13 - SPEED PASS
+- Downloads count as "finished" sooner: the full recheck starts the moment the last piece is in, uses several threads, and a good result finishes the download at once (2,000 small files: about 13 s instead of 19 s in the local benchmark).
+- More connection attempts at once (Balanced 48, was 16) and more peers per torrent (Balanced 200, was 100): faster past dead peers and with many slow peers (42 MB/s instead of 29 MB/s with 150 peers in the benchmark).
+- Fixed a crash in the torrent engine (MonoTorrent) that could close the app when many peers connected at the same moment.
+- Measured on this PC with local test swarms only. Still no uTP (MonoTorrent has none). Every connection is still bound to your VPN.
+
 WHAT'S NEW IN 1.12 - REMOVE ALL
 - A Remove all button next to Pause all / Resume all. It asks first: everything or only the finished ones, and whether the files go to the Recycle Bin (by default they stay).
 

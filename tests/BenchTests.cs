@@ -8,7 +8,8 @@
 // (a recheck of the finished download) for each performance profile ("v14" = exactly 1.4's settings). Runs at BelowNormal priority and
 // only while neither game runs (a run is thrown away and repeated when one starts). Generated data in %TEMP%, deleted afterwards.
 //   TorrentsTests.exe bench [--big 2048] [--files 2000] [--runs 2] [--profiles v14,balanced,max] [--scen lan,wan] [--latency 40]
-//                           [--cap 6144] [--seeders 4] [--leechers 2] [--out <file without extension>]
+//                           [--cap 6144] [--seeders 4] [--leechers 2] [--dead 60] [--out <file without extension>]
+//   scenarios: lan, wan (latency + an upload cap per peer), crowd (many slow peers), dead (1.13: wan's peers listed behind dead ones)
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -32,7 +33,7 @@ namespace HallowTorrents.Tests
     public class BenchResult
     {
         public string Profile, Torrent, Scenario; public int Run; public bool Ok; public string Error;
-        public long Bytes; public double Seconds, AvgMBps, PeakMBps, CpuSeconds, CpuPctOneCore, VerifySeconds, FinishSeconds; public long PeakMB, WrittenMB;
+        public long Bytes; public double FirstByteSeconds = -1; public double Seconds, AvgMBps, PeakMBps, CpuSeconds, CpuPctOneCore, VerifySeconds, FinishSeconds; public long PeakMB, WrittenMB;
     }
 
     public static class Bench
@@ -59,12 +60,21 @@ namespace HallowTorrents.Tests
             s.Perf = profile;   // after Fix: "v14" is the benchmark's 1.4 baseline
             int ov; if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_OPENFILES"), out ov)) s.PerfOpenFiles = ov;   // experiments
             if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_CACHE"), out ov)) Core.BenchCacheBytes = ov;
+            // 1.13 experiments (the Advanced numbers, MonoTorrent's connection timeout, 1.12's single-threaded recheck)
+            if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_HALFOPEN"), out ov)) s.PerfHalfOpen = ov;
+            if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_SLOTS"), out ov)) s.PerfUploadSlots = ov;
+            if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_PERTORRENT"), out ov)) s.PerfPerTorrent = ov;
+            if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_CONNTIMEOUT"), out ov)) Core.BenchConnectTimeoutSeconds = ov;
+            if (Environment.GetEnvironmentVariable("HALLOW_BENCH_ENGINEVERIFY") == "1") Core.BenchEngineVerify = true;
+            if (Environment.GetEnvironmentVariable("HALLOW_BENCH_FVNORMAL") == "1") FastVerify.LowPriority = false;
+            if (int.TryParse(Environment.GetEnvironmentVariable("HALLOW_BENCH_FVTHREADS"), out ov)) FastVerify.Threads = ov;
             var enc = Environment.GetEnvironmentVariable("HALLOW_BENCH_ENC");   // experiments: plain / header / full / mt (MonoTorrent's default order)
             if (enc == "plain") Core.BenchEncryption = new List<EncryptionType> { EncryptionType.PlainText };
             else if (enc == "header") Core.BenchEncryption = new List<EncryptionType> { EncryptionType.RC4Header, EncryptionType.PlainText };
             else if (enc == "full") Core.BenchEncryption = new List<EncryptionType> { EncryptionType.RC4Full };
             else if (enc == "mt") Core.BenchEncryption = new List<EncryptionType> { EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText };
             var core = new Core(dir, () => s);
+            core.Log += l => { if (l.StartsWith("verified ")) Console.WriteLine("why " + l.Substring(0, 9) + l.Substring(Math.Min(l.Length, 9 + 41))); };   // 1.13: the recheck's stop / check times
             string err; var e = core.AddTorrentFile(torrent, null, null, null, true, out err);
             if (e == null) { Console.WriteLine("RESULT error " + err); return 2; }
             core.SetVpn(new VpnState { Ok = true, Ip = ip, Adapter = "bench", AdapterId = "bench" }).Wait();
@@ -75,19 +85,22 @@ namespace HallowTorrents.Tests
             var cpu0 = me.TotalProcessorTime; IoCounters io0; GetProcessIoCounters(me.Handle, out io0);
             m.AddPeersAsync(peers.Select(p => new PeerInfo(new Uri("ipv4://" + p)))).Wait();
             var ticker = new Timer(_ => { try { core.Tick().Wait(); } catch { } }, null, 0, 1000);   // the app ticks every second
-            sw.Restart(); long lastBytes = 0; double peak = 0; var window = new Queue<KeyValuePair<long, long>>(); double downloaded = -1;
+            sw.Restart(); long lastBytes = 0; double peak = 0; var window = new Queue<KeyValuePair<long, long>>(); double downloaded = -1, firstByte = -1;
             while (sw.Elapsed.TotalSeconds < timeout)
             {
                 Thread.Sleep(250);
                 long got = m.Monitor.DataBytesReceived; long t = sw.ElapsedMilliseconds;
                 window.Enqueue(new KeyValuePair<long, long>(t, got)); while (window.Count > 2 && t - window.ElementAt(1).Key >= 1000) window.Dequeue();
                 var first = window.Peek(); if (t - first.Key >= 1000) peak = Math.Max(peak, (got - first.Value) / ((t - first.Key) / 1000.0));
+                if (got > 0 && firstByte < 0) firstByte = sw.Elapsed.TotalSeconds;
                 if (got != lastBytes) { Console.WriteLine("T " + t + " " + got); lastBytes = got; }
                 if (t % 5000 < 250 && Environment.GetEnvironmentVariable("HALLOW_BENCH_DEBUG") != null) Console.Error.WriteLine("dbg " + t + " state " + m.State + " progress " + m.Progress.ToString("0.0") + " open " + m.OpenConnections + " avail " + m.Peers.Available + " seeds " + m.Peers.Seeds + " leechs " + m.Peers.Leechs);
                 if (downloaded < 0 && m.Complete) downloaded = sw.Elapsed.TotalSeconds;   // every piece in (the engine's view)
                 if (core.Get(e.Id).CompletedAt != null) break;   // Core's "finished" (1.5: after its own full recheck)
             }
             var finish = sw.Elapsed.TotalSeconds; var secs = downloaded > 0 ? downloaded : finish; bool ok = core.Get(e.Id).CompletedAt != null;
+            if (Environment.GetEnvironmentVariable("HALLOW_BENCH_DEBUG") != null && ok) { var fv = Stopwatch.StartNew(); var fb = FastVerify.Check(m); Console.WriteLine("why fast recheck again: " + fb + " bad, " + fv.Elapsed.TotalSeconds.ToString("0.00") + " s (hashing " + FastVerify.LastHashSeconds.ToString("0.00") + " s)"); }
+            if (Environment.GetEnvironmentVariable("HALLOW_BENCH_DEBUG") != null) Console.WriteLine("why peer events serialized: " + PexGuard.Serialized + " (guard " + (PexGuard.On ? "on" : "OFF") + ")");
             if (core.Repaired > 0) Console.WriteLine("why repaired " + core.Repaired + " bad piece(s) found by the recheck on completion");
             var cpu = (me.TotalProcessorTime - cpu0).TotalSeconds; me.Refresh(); var peakMb = me.PeakWorkingSet64 / (1024 * 1024);
             IoCounters io1; GetProcessIoCounters(me.Handle, out io1);
@@ -130,7 +143,7 @@ namespace HallowTorrents.Tests
             }
             else why = "not complete after " + timeout + " s (" + m.Progress.ToString("0.0") + "%)";
             if (why != null) Console.WriteLine("why " + why);
-            var r = new BenchResult { Profile = profile, Ok = ok, Bytes = size, FinishSeconds = finish, Seconds = secs, AvgMBps = m.Torrent.Size / secs / 1048576.0, PeakMBps = peak / 1048576.0, CpuSeconds = cpu, CpuPctOneCore = cpu / finish * 100, PeakMB = peakMb, WrittenMB = (long)((io1.WriteBytes - io0.WriteBytes) / 1048576), VerifySeconds = verify };
+            var r = new BenchResult { Profile = profile, Ok = ok, Bytes = size, FinishSeconds = finish, Seconds = secs, AvgMBps = m.Torrent.Size / secs / 1048576.0, PeakMBps = peak / 1048576.0, CpuSeconds = cpu, CpuPctOneCore = cpu / finish * 100, PeakMB = peakMb, WrittenMB = (long)((io1.WriteBytes - io0.WriteBytes) / 1048576), VerifySeconds = verify, FirstByteSeconds = firstByte };
             Console.WriteLine("RESULT " + Line(r));
             try { core.Dispose(); } catch { }   // (already disposed after a finished download)
             return ok ? 0 : 1;
@@ -138,14 +151,14 @@ namespace HallowTorrents.Tests
         static string Line(BenchResult r)
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
-            return string.Join(";", r.Ok ? "ok" : "fail", r.Bytes.ToString(c), r.Seconds.ToString("0.000", c), r.AvgMBps.ToString("0.00", c), r.PeakMBps.ToString("0.00", c), r.CpuSeconds.ToString("0.00", c), r.CpuPctOneCore.ToString("0.0", c), r.PeakMB.ToString(c), r.WrittenMB.ToString(c), r.VerifySeconds.ToString("0.000", c), r.FinishSeconds.ToString("0.000", c));
+            return string.Join(";", r.Ok ? "ok" : "fail", r.Bytes.ToString(c), r.Seconds.ToString("0.000", c), r.AvgMBps.ToString("0.00", c), r.PeakMBps.ToString("0.00", c), r.CpuSeconds.ToString("0.00", c), r.CpuPctOneCore.ToString("0.0", c), r.PeakMB.ToString(c), r.WrittenMB.ToString(c), r.VerifySeconds.ToString("0.000", c), r.FinishSeconds.ToString("0.000", c), r.FirstByteSeconds.ToString("0.000", c));
         }
         public static BenchResult Parse(string line)
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
             if (line == null || !line.StartsWith("RESULT ")) return null;
             var p = line.Substring(7).Split(';'); if (p.Length < 10) return new BenchResult { Ok = false, Error = line.Substring(7) };
-            return new BenchResult { Ok = p[0] == "ok", Bytes = long.Parse(p[1], c), Seconds = double.Parse(p[2], c), AvgMBps = double.Parse(p[3], c), PeakMBps = double.Parse(p[4], c), CpuSeconds = double.Parse(p[5], c), CpuPctOneCore = double.Parse(p[6], c), PeakMB = long.Parse(p[7], c), WrittenMB = long.Parse(p[8], c), VerifySeconds = double.Parse(p[9], c), FinishSeconds = p.Length > 10 ? double.Parse(p[10], c) : 0 };
+            return new BenchResult { Ok = p[0] == "ok", Bytes = long.Parse(p[1], c), Seconds = double.Parse(p[2], c), AvgMBps = double.Parse(p[3], c), PeakMBps = double.Parse(p[4], c), CpuSeconds = double.Parse(p[5], c), CpuPctOneCore = double.Parse(p[6], c), PeakMB = long.Parse(p[7], c), WrittenMB = long.Parse(p[8], c), VerifySeconds = double.Parse(p[9], c), FinishSeconds = p.Length > 10 ? double.Parse(p[10], c) : 0, FirstByteSeconds = p.Length > 11 ? double.Parse(p[11], c) : -1 };
         }
 
         // ---------------- a delay relay: every byte waits `oneWayMs` in each direction (round trip = 2 x oneWayMs)
@@ -194,6 +207,21 @@ namespace HallowTorrents.Tests
                 }) { IsBackground = true }.Start();
             }
             public void Dispose() { stop = true; try { l.Stop(); } catch { } lock (open) foreach (var s in open) try { s.Close(); } catch { } }
+        }
+
+        // ---------------- 1.13: dead peers, like most of what a tracker / DHT hands out on the internet: "silent" accepts the connection and
+        // never answers the handshake (a stalled or overloaded peer); "closed" has nothing listening (refused). They're listed BEFORE the
+        // real peers, so how fast the client gives up on them and moves on shows in the time to the first byte and the total.
+        public class Tarpit : IDisposable
+        {
+            readonly TcpListener l; readonly List<Socket> held = new List<Socket>(); volatile bool stop;
+            public IPEndPoint EndPoint { get { return (IPEndPoint)l.LocalEndpoint; } }
+            public Tarpit(IPAddress ip)
+            {
+                l = new TcpListener(ip, 0); l.Start(64);
+                new Thread(() => { while (!stop) { try { var a = l.AcceptSocket(); lock (held) held.Add(a); } catch { return; } } }) { IsBackground = true, Name = "tarpit" }.Start();
+            }
+            public void Dispose() { stop = true; try { l.Stop(); } catch { } lock (held) foreach (var x in held) try { x.Close(); } catch { } }
         }
 
         // ---------------- the orchestrator
@@ -247,7 +275,7 @@ namespace HallowTorrents.Tests
             try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
             int bigMb = int.Parse(Arg(a, "--big", "2048")), files = int.Parse(Arg(a, "--files", "2000")), runs = int.Parse(Arg(a, "--runs", "2"));
             int latency = int.Parse(Arg(a, "--latency", "40")), cap = int.Parse(Arg(a, "--cap", "6144")), nSeed = int.Parse(Arg(a, "--seeders", "4")), nLeech = int.Parse(Arg(a, "--leechers", "2"));
-            int nCrowd = int.Parse(Arg(a, "--crowd", "80")), crowdCap = int.Parse(Arg(a, "--crowdcap", "320"));
+            int nCrowd = int.Parse(Arg(a, "--crowd", "80")), crowdCap = int.Parse(Arg(a, "--crowdcap", "320")), nDead = int.Parse(Arg(a, "--dead", "60"));
             var profiles = Arg(a, "--profiles", "v14,balanced,max").Split(','); var scens = Arg(a, "--scen", "lan,wan").Split(',');
             var only = Arg(a, "--torrents", "big,small").Split(','); var outFile = Arg(a, "--out", null);
             var root = Path.Combine(Path.GetTempPath(), "HallowBench" + Process.GetCurrentProcess().Id); Directory.CreateDirectory(root);
@@ -272,7 +300,8 @@ namespace HallowTorrents.Tests
                 {
                     // lan: a few unlimited peers next door; wan: the same peers with latency and an upload cap each; crowd: many slow
                     // peers (like a popular torrent on the internet) - the case where the number of connections matters
-                    bool crowd = scen == "crowd", wan = scen == "wan" || crowd; int upCap = crowd ? crowdCap : wan ? cap : 0;
+                    // dead (1.13): wan's peers listed behind dead ones (half silent, half refused)
+                    bool crowd = scen == "crowd", dead = scen == "dead", wan = scen == "wan" || crowd || dead; int upCap = crowd ? crowdCap : wan ? cap : 0;
                     int seeds = crowd ? nCrowd : nSeed, leech = crowd ? 0 : nLeech;
                     var seeders = new List<Peer>();
                     for (int i = 0; i < seeds; i++)
@@ -288,7 +317,14 @@ namespace HallowTorrents.Tests
                         if (wan) p.Relay = new Relay(IPAddress.Parse("127.0.2." + (1 + i)), p.Ep, latency / 2);
                         seeders.Add(p); peersAll.Add(p);
                     }
-                    Say(scen + ": " + seeds + " seeders" + (leech > 0 ? " + " + leech + " other leechers" : "") + (wan ? " (" + latency + " ms round trip, " + upCap + " KB/s upload each)" : " (no limits)"));
+                    var deadEps = new List<IPEndPoint>(); var pits = new List<Tarpit>();
+                    if (dead)
+                        for (int i = 0; i < nDead; i++)
+                        {
+                            if (i % 2 == 0) { var t = new Tarpit(IPAddress.Parse("127.0.5." + (1 + i))); pits.Add(t); deadEps.Add(t.EndPoint); }
+                            else { var dip = IPAddress.Parse("127.0.6." + (1 + i)); deadEps.Add(new IPEndPoint(dip, FreePort(dip))); }
+                        }
+                    Say(scen + ": " + seeds + " seeders" + (leech > 0 ? " + " + leech + " other leechers" : "") + (dead ? " behind " + nDead + " dead peers" : "") + (wan ? " (" + latency + " ms round trip, " + upCap + " KB/s upload each)" : " (no limits)"));
                     foreach (var tk in torrents.Keys.Where(k => !crowd || k == "big"))
                         for (int run = 1; run <= runs; run++)
                             foreach (var prof in (run % 2 == 1 ? profiles : profiles.Reverse().ToArray()))
@@ -297,15 +333,16 @@ namespace HallowTorrents.Tests
                                 for (int attempt = 0; attempt < 5 && r == null; attempt++)
                                 {
                                     WaitNoGame(60);
-                                    r = OneRun(root, torrents[tk], seeders, leech, wan, latency, upCap, prof, tk == "big" ? 900 : 600);
+                                    r = OneRun(root, torrents[tk], seeders, leech, wan, latency, upCap, prof, tk == "big" ? 900 : 600, deadEps);
                                     if (r == null) Say("thrown away (a game started) - repeating");
                                 }
                                 if (r == null) continue;
                                 r.Torrent = tk; r.Scenario = scen; r.Run = run; r.Profile = prof; results.Add(r);
-                                Say(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0,-4} {1,-6} {2,-9} run {3}: {4}{13} {5:0.0} s, avg {6:0.0} MB/s, peak {7:0.0} MB/s, CPU {8:0.0} s ({9:0}% of a core), peak {10} MB, wrote {11} MB, verify {12:0.00} s",
-                                    scen, tk, prof, run, r.Ok ? "ok" : "FAILED " + r.Error, r.Seconds, r.AvgMBps, r.PeakMBps, r.CpuSeconds, r.CpuPctOneCore, r.PeakMB, r.WrittenMB, r.VerifySeconds, r.Ok && !string.IsNullOrEmpty(r.Error) ? " (" + r.Error + ")" : ""));
+                                Say(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0,-4} {1,-6} {2,-9} run {3}: {4}{13} {5:0.0} s, avg {6:0.0} MB/s, peak {7:0.0} MB/s, CPU {8:0.0} s ({9:0}% of a core), peak {10} MB, wrote {11} MB, verify {12:0.00} s, finished {14:0.0} s, first byte {15:0.00} s",
+                                    scen, tk, prof, run, r.Ok ? "ok" : "FAILED " + r.Error, r.Seconds, r.AvgMBps, r.PeakMBps, r.CpuSeconds, r.CpuPctOneCore, r.PeakMB, r.WrittenMB, r.VerifySeconds, r.Ok && !string.IsNullOrEmpty(r.Error) ? " (" + r.Error + ")" : "", r.FinishSeconds, r.FirstByteSeconds));
                             }
                     foreach (var p in seeders) { try { p.Engine.StopAllAsync().Wait(3000); } catch { } try { p.Engine.Dispose(); } catch { } if (p.Relay != null) p.Relay.Dispose(); }
+                    foreach (var t in pits) t.Dispose();
                 }
                 if (outFile != null) Write(results, outFile, a);
                 return results.Count > 0 && results.All(x => x.Ok) ? 0 : 1;
@@ -322,7 +359,7 @@ namespace HallowTorrents.Tests
         }
 
         // one download: fresh leechers + the measured client process. null = thrown away because a game started.
-        static BenchResult OneRun(string root, string[] torrent, List<Peer> seeders, int nLeech, bool wan, int latency, int upCap, string profile, int timeout)
+        static BenchResult OneRun(string root, string[] torrent, List<Peer> seeders, int nLeech, bool wan, int latency, int upCap, string profile, int timeout, List<IPEndPoint> deadEps = null)
         {
             var leechers = new List<Peer>(); var tag = Guid.NewGuid().ToString("N").Substring(0, 6);
             var save = Path.Combine(root, "dl-" + tag); Process child = null;
@@ -336,7 +373,7 @@ namespace HallowTorrents.Tests
                     if (wan) p.Relay = new Relay(IPAddress.Parse("127.0.4." + (1 + j)), p.Ep, latency / 2);
                     leechers.Add(p);
                 }
-                var peers = seeders.Concat(leechers).Select(p => p.Relay != null ? p.Relay.EndPoint : p.Ep).Select(e => e.ToString());
+                var peers = (deadEps ?? new List<IPEndPoint>()).Concat(seeders.Concat(leechers).Select(p => p.Relay != null ? p.Relay.EndPoint : p.Ep)).Select(e => e.ToString());
                 var exe = typeof(Bench).Assembly.Location;
                 var psi = new ProcessStartInfo(exe, "bench-client --profile " + profile + " --torrent \"" + torrent[1] + "\" --save \"" + save + "\" --peers " + string.Join(",", peers) + " --ip 127.0.0.3 --timeout " + timeout)
                 { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
@@ -373,7 +410,7 @@ namespace HallowTorrents.Tests
             {
                 Func<Func<BenchResult, double>, double> med = f => { var v = g.Select(f).OrderBy(x => x).ToList(); return v.Count % 2 == 1 ? v[v.Count / 2] : (v[v.Count / 2 - 1] + v[v.Count / 2]) / 2; };
                 var k = g.Key.Split('|');
-                rows.Add(new[] { k[0], k[1], k[2], g.Count().ToString(), med(r => r.Seconds).ToString("0.0", c), med(r => r.AvgMBps).ToString("0.0", c), med(r => r.PeakMBps).ToString("0.0", c), med(r => r.CpuSeconds).ToString("0.0", c), med(r => r.CpuPctOneCore).ToString("0", c), med(r => r.PeakMB).ToString("0", c), med(r => r.WrittenMB).ToString("0", c), med(r => r.VerifySeconds).ToString("0.00", c), med(r => r.FinishSeconds).ToString("0.0", c) });
+                rows.Add(new[] { k[0], k[1], k[2], g.Count().ToString(), med(r => r.Seconds).ToString("0.0", c), med(r => r.AvgMBps).ToString("0.0", c), med(r => r.PeakMBps).ToString("0.0", c), med(r => r.CpuSeconds).ToString("0.0", c), med(r => r.CpuPctOneCore).ToString("0", c), med(r => r.PeakMB).ToString("0", c), med(r => r.WrittenMB).ToString("0", c), med(r => r.VerifySeconds).ToString("0.00", c), med(r => r.FinishSeconds).ToString("0.0", c), med(r => r.FirstByteSeconds).ToString("0.00", c) });
             }
             return rows;
         }
@@ -381,8 +418,8 @@ namespace HallowTorrents.Tests
         {
             var sb = new StringBuilder();
             sb.AppendLine("Hallow Torrents local benchmark - " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + " - args: " + string.Join(" ", args));
-            sb.AppendLine("| Scenario | Torrent | Profile | Runs | Download (s) | Avg MB/s | Peak MB/s | CPU (s) | CPU (% of a core) | Peak RAM (MB) | Written (MB) | Recheck (s) | Finished (s) |");
-            sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+            sb.AppendLine("| Scenario | Torrent | Profile | Runs | Download (s) | Avg MB/s | Peak MB/s | CPU (s) | CPU (% of a core) | Peak RAM (MB) | Written (MB) | Recheck (s) | Finished (s) | First byte (s) |");
+            sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
             foreach (var r in Table(rs)) sb.AppendLine("| " + string.Join(" | ", r) + " |");
             sb.AppendLine(); sb.AppendLine("Every run:");
             foreach (var r in rs) sb.AppendLine(r.Scenario + " " + r.Torrent + " " + r.Profile + " run " + r.Run + ": " + (r.Ok ? "" : "FAILED " + r.Error + " ") + Line(r));

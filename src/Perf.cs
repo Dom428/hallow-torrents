@@ -36,10 +36,16 @@ namespace HallowTorrents
             switch (name)
             {
                 case "v14": return new PerfValues { Name = "v14", Connections = 150, PerTorrent = 60, HalfOpen = 8, CacheMB = 5, OpenFiles = 196, UploadSlots = 8, Endgame = 2 };
-                case "max": return new PerfValues { Name = "max", Connections = 500, PerTorrent = 200, HalfOpen = 24, CacheMB = 64, OpenFiles = 512, UploadSlots = 10, Endgame = 4 };
-                case "light": return new PerfValues { Name = "light", Connections = 80, PerTorrent = 40, HalfOpen = 6, CacheMB = 8, OpenFiles = 96, UploadSlots = 4, Endgame = 2 };
-                case "gaming": return new PerfValues { Name = "gaming", Connections = 50, PerTorrent = 30, HalfOpen = 4, CacheMB = 4, OpenFiles = 64, UploadSlots = 3, Endgame = 1 };
-                default: return new PerfValues { Name = "balanced", Connections = 300, PerTorrent = 100, HalfOpen = 16, CacheMB = 32, OpenFiles = 256, UploadSlots = 8, Endgame = 3 };
+                // 1.13: more connection attempts at once in every profile (the "dead" benchmark: 60 dead peers listed before the
+                // real ones - 16 at once: first byte after 2.9 s, 48: 0.8 s, about 7% faster overall). Windows has no half-open limit
+                // and libtorrent / qBittorrent don't cap it either (they pace new attempts per second instead).
+                // 1.13: Balanced 200 peers per torrent (500 in all; was 100 / 300), Max 400 / 800 - with 150 slow peers (320 KB/s each)
+                // 100 per torrent downloaded at 27 MB/s, 200 at 41 MB/s. Safe only with PexGuard113.cs: MonoTorrent 3.0.2 crashed in
+                // 4 of 8 such runs without it, 0 of 12 with it.
+                case "max": return new PerfValues { Name = "max", Connections = 800, PerTorrent = 400, HalfOpen = 96, CacheMB = 64, OpenFiles = 512, UploadSlots = 10, Endgame = 4 };
+                case "light": return new PerfValues { Name = "light", Connections = 80, PerTorrent = 40, HalfOpen = 16, CacheMB = 8, OpenFiles = 96, UploadSlots = 4, Endgame = 2 };
+                case "gaming": return new PerfValues { Name = "gaming", Connections = 50, PerTorrent = 30, HalfOpen = 8, CacheMB = 4, OpenFiles = 64, UploadSlots = 3, Endgame = 1 };
+                default: return new PerfValues { Name = "balanced", Connections = 500, PerTorrent = 200, HalfOpen = 48, CacheMB = 32, OpenFiles = 256, UploadSlots = 8, Endgame = 3 };
             }
         }
         public static string Label(string name)
@@ -67,7 +73,7 @@ namespace HallowTorrents
             if (s.Perf != "max" && s.Perf != "light" && s.Perf != "v14") s.Perf = "balanced";
             s.PerfConnections = Clamp(s.PerfConnections, 10, 2000);
             s.PerfPerTorrent = Clamp(s.PerfPerTorrent, 5, 1000);
-            s.PerfHalfOpen = Clamp(s.PerfHalfOpen, 1, 100);
+            s.PerfHalfOpen = Clamp(s.PerfHalfOpen, 1, 200);
             s.PerfCacheMB = Clamp(s.PerfCacheMB, 1, 512);
             s.PerfUploadSlots = Clamp(s.PerfUploadSlots, 1, 50);
             s.PerfOpenFiles = Clamp(s.PerfOpenFiles, 16, 2048);

@@ -259,6 +259,7 @@ namespace HallowTorrents.Tests
                 var tf = await MakeTorrent(w, "VerifyData", new[] { 3 * 1024 * 1024, 200000, 700000 }, "http://127.0.0.1:" + w.HttpPort + "/announce");
                 int port = FreePort(); var save = Path.Combine(root, "dl"); var s = TestSettings(port, save);
                 var core = new Core(Path.Combine(root, "core"), () => s); var log = new List<string>(); core.Log += q => { lock (log) log.Add(q); };
+                core.VerifyOnStateChange = false;   // 1.13: no recheck the moment the engine says complete - the test damages the file first
                 string err; var e = core.AddTorrentFile(tf, null, null, null, true, out err);
                 await core.SetVpn(Vpn(VpnIp)); await core.Tick();   // no ticker: the test decides when Core looks
                 var m = core.ManagerForTests(e.Id);

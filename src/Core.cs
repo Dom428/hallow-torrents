@@ -113,7 +113,7 @@ namespace HallowTorrents
         public string LastError; public int Blocked; public int BlocklistRanges; public string BlocklistError;
         // v1.5: the performance profile in use (Perf.cs); Gaming = a game runs and "While you play" limits the speed -> the light gaming numbers
         public bool Gaming;
-        public static List<EncryptionType> BenchEncryption; public static int BenchCacheBytes = -1;
+        public static List<EncryptionType> BenchEncryption; public static int BenchCacheBytes = -1, BenchConnectTimeoutSeconds;
         public PerfValues PerfNow { get { return Perf.For(S, Gaming); } }
         // v1.5: the socket watchdog found a socket outside the VPN: the engine is stopped and stays stopped until you resume it
         public volatile string Tripped; public string TrippedAt;
@@ -121,7 +121,7 @@ namespace HallowTorrents
         public event Action<Entry> Completed;
         public event Action<string> Log;
         public Func<string, bool> Exists = File.Exists;
-        public Core(string dir, Func<TorSettings> settings) { Dir = dir; this.settings = settings; Load(); Stats = Stats.Load(dir); }
+        public Core(string dir, Func<TorSettings> settings) { Dir = dir; this.settings = settings; Load(); Stats = Stats.Load(dir); PexGuard.Install(); }   // 1.13: PexGuard113.cs
         void L(string s) { var h = Log; if (h != null) try { h(s); } catch { } }
         public bool EngineUp { get { return engine != null; } }
         public List<IPAddress> BoundDns { get { return boundDns; } }
@@ -282,6 +282,7 @@ namespace HallowTorrents
                 : new List<EncryptionType> { EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText };
             if (BenchEncryption != null) b.AllowedEncryption = BenchEncryption;   // the benchmark's experiments only (null in the app)
             if (BenchCacheBytes >= 0) b.DiskCacheBytes = BenchCacheBytes;
+            if (BenchConnectTimeoutSeconds > 0) b.ConnectionTimeout = TimeSpan.FromSeconds(BenchConnectTimeoutSeconds);
             return b.ToSettings();
         }
         async Task Build(IPAddress ip, List<IPAddress> dns, string key)
@@ -361,6 +362,8 @@ namespace HallowTorrents
             else if (x.Magnet != null) m = await e.AddAsync(MagnetLink.Parse(x.Magnet), x.SavePath, SettingsFor(x)).ConfigureAwait(false);
             else { x.Scan = x.Scan ?? ""; L("no source for " + x.Id); return; }
             lock (lk) { mgr[x.Id] = m; last[x.Id] = new long[] { 0, 0 }; }
+            // 1.13: the last piece in -> the recheck starts now, not at the next 1-second tick
+            m.TorrentStateChanged += (s, a) => { if (VerifyOnStateChange && a.NewState == TorrentState.Seeding && x.CompletedAt == null) Task.Run(() => { try { if (M(x.Id) == m) CheckDone(x, m); } catch { } }); };
             if (m.HasMetadata) { await ApplyFiles(x, m).ConfigureAwait(false); await ApplyPaths(x, m).ConfigureAwait(false); }
             if (x.Trackers != null) await ApplyTrackers(x, m).ConfigureAwait(false);
             if (x.Sequential) { try { await m.ChangePickerAsync(new MonoTorrent.PiecePicking.StreamingPieceRequester()).ConfigureAwait(false); } catch (Exception ex) { L("sequential: " + ex.Message); } }
@@ -387,59 +390,97 @@ namespace HallowTorrents
                 foreach (var kv in ms)
                 {
                     var x = Get(kv.Key); var m = kv.Value; if (x == null) continue;
-                    long[] l; lock (lk) if (!last.TryGetValue(kv.Key, out l)) last[kv.Key] = l = new long[] { 0, 0 };
-                    long sent = m.Monitor.DataBytesSent, recv = m.Monitor.DataBytesReceived;
-                    if (sent >= l[0]) { x.Up += sent - l[0]; tickUp += sent - l[0]; } if (recv >= l[1]) { x.Down += recv - l[1]; tickDown += recv - l[1]; } l[0] = sent; l[1] = recv;
+                    var d = Account(kv.Key, x, m); tickDown += d[0]; tickUp += d[1];
                     if (m.State == TorrentState.Seeding) { x.SeedSecs += 1; anySeeding = true; }
                     if (m.HasMetadata && (x.Files == null || x.TorrentFile == null)) GotMetadata(x, m);
                     try { RescueTick(x, m, DateTime.Now); } catch { }   // 1.10: magnets stuck on "Getting info"
-                    if (m.HasMetadata && m.Complete && x.CompletedAt == null && m.State != TorrentState.Hashing && m.State != TorrentState.HashingPaused)
-                    {
-                        // v1.5: a full recheck of what's on disk before it counts as finished (MonoTorrent 3.0.2 can report a torrent with
-                        // many small files complete while a block on disk was never written - found by the 1.5 benchmark). Bad pieces are
-                        // downloaded again. "v14" (the benchmark's 1.4 baseline) skips it, like 1.4 did.
-                        bool verified; lock (lk) verified = verifiedIds.Contains(kv.Key);
-                        if (!verified && !x.Created && S.Perf != "v14") { StartVerify(x, m); continue; }
-                        x.CompletedAt = Family.Time(DateTime.Now); L("complete " + x.Id);
-                        if (S.PauseWhenDone && !x.Created && !x.NoLimit) { x.UserPaused = true; L("paused when done " + x.Id); }   // 1.11: pause instead of seeding
-                        Save();
-                        var h = Completed; if (h != null) try { h(x); } catch { }
-                    }
+                    CheckDone(x, m);
                     if (m.State == TorrentState.Error && m.Error != null) LastError = m.Error.Exception != null ? m.Error.Exception.Message : m.Error.Reason.ToString();
                 }
                 await Reconcile().ConfigureAwait(false);
             }
-            bool waiting; lock (lk) waiting = e == null && Entries.Any(x => !x.UserPaused);
+            bool waiting; lock (lk) { waiting = e == null && Entries.Any(x => !x.UserPaused); tickDown += pendingDown; tickUp += pendingUp; pendingDown = pendingUp = 0; }
             Stats.Tick(tickDown, tickUp, anySeeding, waiting, Blocked);
+        }
+        // the engine's byte counters since the last look -> the torrent's totals; returns {down, up}. 1.13: also called right before the
+        // recheck stops the torrent (the engine counts from 0 again after a stop), so the last bytes of a download that finishes
+        // between two ticks are in its totals before it counts as finished
+        long pendingDown, pendingUp;
+        long[] Account(string id, Entry x, TorrentManager m)
+        {
+            lock (lk)
+            {
+                long[] l; if (!last.TryGetValue(id, out l)) last[id] = l = new long[] { 0, 0 };
+                long sent = m.Monitor.DataBytesSent, recv = m.Monitor.DataBytesReceived, up = 0, down = 0;
+                if (sent >= l[0]) { up = sent - l[0]; x.Up += up; } if (recv >= l[1]) { down = recv - l[1]; x.Down += down; } l[0] = sent; l[1] = recv;
+                return new[] { down, up };
+            }
         }
         // ---- v1.5: verify on completion
         readonly HashSet<string> verifying = new HashSet<string>(), verifiedIds = new HashSet<string>();
         readonly Dictionary<string, int> repairs = new Dictionary<string, int>();
         public int Repaired;   // pieces found bad on disk and downloaded again (this session)
         public bool Verifying(string id) { lock (lk) return verifying.Contains(id); }
+        public double LastVerifySeconds = -1, LastStopSeconds = -1; public string LastVerifyKind;   // 1.13: "fast" (multi-threaded) or "engine" (MonoTorrent's)
+        // finished? (from the tick, the engine's switch to Seeding, and the end of a recheck - whichever is first; once only)
+        readonly object doneLock = new object();
+        void CheckDone(Entry x, TorrentManager m)
+        {
+            if (!(m.HasMetadata && m.Complete && x.CompletedAt == null && m.State != TorrentState.Hashing && m.State != TorrentState.HashingPaused)) return;
+            if (x.Files == null || x.TorrentFile == null) return;   // a magnet's .torrent copy and file list first (the tick does that, then comes here)
+            // v1.5: a full recheck of what's on disk before it counts as finished (MonoTorrent 3.0.2 can report a torrent with
+            // many small files complete while a block on disk was never written - found by the 1.5 benchmark). Bad pieces are
+            // downloaded again. "v14" (the benchmark's 1.4 baseline) skips it, like 1.4 did.
+            bool verified; lock (lk) verified = verifiedIds.Contains(x.Id);
+            if (!verified && !x.Created && S.Perf != "v14") { StartVerify(x, m); return; }
+            lock (doneLock)
+            {
+                if (x.CompletedAt != null) return;
+                x.CompletedAt = Family.Time(DateTime.Now);
+            }
+            L("complete " + x.Id);
+            if (S.PauseWhenDone && !x.Created && !x.NoLimit) { x.UserPaused = true; L("paused when done " + x.Id); }   // 1.11: pause instead of seeding
+            Save();
+            var h = Completed; if (h != null) try { h(x); } catch { }
+        }
         void StartVerify(Entry x, TorrentManager m)
         {
             lock (lk) { if (!verifying.Add(x.Id)) return; }
             Task.Run(async () =>
             {
+                bool good = false;
                 try
                 {
-                    L("verifying " + x.Id);
-                    await m.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-                    await m.HashCheckAsync(false).ConfigureAwait(false);
-                    int tries; lock (lk) { repairs.TryGetValue(x.Id, out tries); }
-                    if (m.Complete || tries >= 3) { lock (lk) verifiedIds.Add(x.Id); if (!m.Complete) L("verify: still incomplete after 3 repairs " + x.Id); else L("verified " + x.Id); }
-                    else
-                    {
-                        int bad = m.Bitfield.Length - m.Bitfield.TrueCount; Interlocked.Add(ref Repaired, bad);
-                        lock (lk) repairs[x.Id] = tries + 1;
-                        L("verify: " + bad + " piece(s) on disk were bad - downloading them again " + x.Id);
-                    }
+                    L("verifying " + x.Id); var sw = System.Diagnostics.Stopwatch.StartNew();
+                    if (M(x.Id) == m) { var d = Account(x.Id, x, m); lock (lk) { pendingDown += d[0]; pendingUp += d[1]; } }   // 1.13: before the stop resets the engine's counters
+                    await m.StopAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);   // flushes the disk cache
+                    var stopSecs = sw.Elapsed.TotalSeconds; LastStopSeconds = stopSecs;
+                    // 1.13: every piece hashed on several threads straight from the files; only a bad / missing piece (or a torrent this
+                    // can't check) goes through MonoTorrent's own recheck, which marks those pieces to be downloaded again
+                    int fast = -1; if (!BenchEngineVerify) fast = await Task.Run(() => FastVerify.Check(m, Gaming ? 2 : FastVerify.Threads)).ConfigureAwait(false);
+                    if (fast == 0) { lock (lk) verifiedIds.Add(x.Id); good = true; LastVerifyKind = "fast"; LastVerifySeconds = sw.Elapsed.TotalSeconds; L("verified " + x.Id + " (stop " + stopSecs.ToString("0.00") + " s, hashes " + FastVerify.LastSetupSeconds.ToString("0.00") + " s, hashing " + FastVerify.LastHashSeconds.ToString("0.00") + " s, check " + (sw.Elapsed.TotalSeconds - stopSecs).ToString("0.00") + " s)"); }
+                    else await EngineVerify(x, m, fast, sw, r => good = r).ConfigureAwait(false);
                 }
                 catch (Exception ex) { L("verify " + x.Id + ": " + ex.Message); }
                 finally { lock (lk) verifying.Remove(x.Id); }
+                if (good) { try { CheckDone(x, m); } catch (Exception ex) { L("done " + x.Id + ": " + ex.Message); } }   // 1.13: finished now, not at the next tick
                 Kick();
             });
+        }
+        public bool VerifyOnStateChange = true;   // tests that damage a file after "complete" switch it off and tick by hand
+        public static bool BenchEngineVerify;   // benchmark experiments: MonoTorrent's single-threaded recheck only (1.12's way)
+        async Task EngineVerify(Entry x, TorrentManager m, int fast, System.Diagnostics.Stopwatch sw, Action<bool> good)
+        {
+            if (fast > 0) L("verify: " + fast + " piece(s) on disk don't match - MonoTorrent's recheck " + x.Id);
+            await m.HashCheckAsync(false).ConfigureAwait(false); LastVerifyKind = "engine"; LastVerifySeconds = sw.Elapsed.TotalSeconds;
+            int tries; lock (lk) { repairs.TryGetValue(x.Id, out tries); }
+            if (m.Complete || tries >= 3) { lock (lk) verifiedIds.Add(x.Id); good(m.Complete); if (!m.Complete) L("verify: still incomplete after 3 repairs " + x.Id); else L("verified " + x.Id); }
+            else
+            {
+                int bad = m.Bitfield.Length - m.Bitfield.TrueCount; Interlocked.Add(ref Repaired, bad);
+                lock (lk) repairs[x.Id] = tries + 1;
+                L("verify: " + bad + " piece(s) on disk were bad - downloading them again " + x.Id);
+            }
         }
         void GotMetadata(Entry x, TorrentManager m)
         {

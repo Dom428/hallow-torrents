@@ -39,7 +39,7 @@ namespace HallowTorrents
             Action<string, int, Action<int>, int, int> num = (label, value, set, min, max) => adv.Children.Add(Dialogs.Labeled(label, NumField(value, x => { set(x); Saved(); show(); if (!c.SnapMode) c.Core.Kick(); }, 0, max)));
             num("Peers at once (all torrents)", S.PerfConnections, x => S.PerfConnections = x, 10, 2000);
             num("Peers per torrent", S.PerfPerTorrent, x => S.PerfPerTorrent = x, 5, 1000);
-            num("Connecting at once", S.PerfHalfOpen, x => S.PerfHalfOpen = x, 1, 100);
+            num("Connecting at once", S.PerfHalfOpen, x => S.PerfHalfOpen = x, 1, 200);
             num("Disk cache (MB)", S.PerfCacheMB, x => S.PerfCacheMB = x, 1, 512);
             num("Upload slots per torrent", S.PerfUploadSlots, x => S.PerfUploadSlots = x, 1, 50);
             num("Open files", S.PerfOpenFiles, x => S.PerfOpenFiles = x, 16, 2048);
