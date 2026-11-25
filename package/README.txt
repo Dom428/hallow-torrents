@@ -28,6 +28,10 @@ WHAT IT DOES
 - Optional media library hand-off with Jellyfin-friendly names (e.g. to a NAS share).
 - Opens .torrent files and magnet links only after you say yes (for your user only).
 
+WHAT'S NEW IN 1.10 - MAGNETS STUCK ON "GETTING INFO"
+- A magnet link that finds no one in 75 seconds gets well-known public trackers added (after its own) and asks again - through the VPN only, like everything else.
+- Settings > "Add public trackers to magnet links that find no one" (on) turns it off.
+
 WHAT'S NEW IN 1.9 - VPN ON DEMAND
 - Auto-connect (on by default when Hallow VPN is installed): when there's something to download and
   Hallow VPN is off, Hallow Torrents asks it to connect to a P2P server - without changing the server you

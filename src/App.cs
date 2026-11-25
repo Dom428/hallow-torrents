@@ -600,6 +600,7 @@ namespace HallowTorrents
             switch (cmd)
             {
                 case "ping": return "ok " + Family.Json(new Dictionary<string, object> { { "app", "Torrents" }, { "version", Program.Version } });
+                case "details": { var dd = Core.Details(arg.Trim()); return dd == null ? "error usage: details <hash> (from list)" : "ok " + Family.Json(dd); }   // 1.10
                 case "status": { var d = StatusData(true); Family.WriteStatus(Family.Json(d)); return "ok " + Family.Json(d); }
                 case "add": { var direct = RemoteApi.TakeDirect(ref arg); if (arg.Length == 0) return "error add <magnet link or .torrent path> [--category <name>] [--direct]"; var p = SplitAdd(arg); if (arg.TrimEnd().EndsWith("--category", StringComparison.OrdinalIgnoreCase)) return "error --category needs a name"; return OnUi(() => AddFromOutside(p[0], p[1], direct)); }
                 case "pause-all": Core.PauseAll(); WriteStatus(); return "ok";

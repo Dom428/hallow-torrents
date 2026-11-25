@@ -74,6 +74,7 @@ namespace HallowTorrents.Tests
                 if (only == null || only == "unit" || only == "unit19") V19Unit();
                 if (only == null || only == "vpn19") Vpn19();
                 if (only == null || only == "app19") AppCopy19();
+                if (only == null || only == "app110") AppCopy110();   // 1.10: magnets stuck on Getting info
             }
             catch (Exception e) { fail++; Console.WriteLine("FAIL exception: " + e); }
             try { Directory.Delete(Dir, true); } catch { }

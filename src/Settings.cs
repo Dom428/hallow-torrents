@@ -79,6 +79,7 @@ namespace HallowTorrents
         [DataMember] public int Port;                  // 0 = picked on first start
         [DataMember] public bool Dht = true;
         [DataMember] public bool Pex = true;
+        [DataMember] public bool AddPublicTrackers = true;   // 1.10: a magnet that finds no one in 75 s gets well-known public trackers
         [DataMember] public bool Lpd;                  // home network only, can't be bound to the VPN: off by default
         [DataMember] public string Encryption = "prefer";   // "prefer" / "require"
 
@@ -125,7 +126,7 @@ namespace HallowTorrents
         [DataMember] public string PlexMovies, PlexShows;   // the Plex library sections (keys from /library/sections) for Movies and TV
         [DataMember] public string PlexMoviesName, PlexShowsName;
 
-        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; NasMovies = "Movies"; NasShows = "Shows"; MediaServer = "jellyfin"; }
+        [OnDeserializing] void Defaults(StreamingContext c) { UseHallowIcon = true; UseHallowAccent = true; Mode = "follow"; MaxActive = 3; RatioLimit = 2.0; AskOnAdd = true; Dht = true; Pex = true; AddPublicTrackers = true; Encryption = "prefer"; VpnSource = "hallow"; GameMode = "pause"; GameKBps = 200; ScanDone = true; BlocklistDays = 7; ApiPort = 8080; ApiBind = "127.0.0.1"; ApiSessionMinutes = 60; Perf = "balanced"; NasMovies = "Movies"; NasShows = "Shows"; MediaServer = "jellyfin"; }
 
         public static TorSettings Load()
         {

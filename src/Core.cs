@@ -98,7 +98,7 @@ namespace HallowTorrents
         }
     }
 
-    public class Core : IDisposable
+    public partial class Core : IDisposable
     {
         public readonly string Dir; readonly Func<TorSettings> settings; TorSettings S { get { return settings(); } }
         readonly object lk = new object();
@@ -392,6 +392,7 @@ namespace HallowTorrents
                     if (sent >= l[0]) { x.Up += sent - l[0]; tickUp += sent - l[0]; } if (recv >= l[1]) { x.Down += recv - l[1]; tickDown += recv - l[1]; } l[0] = sent; l[1] = recv;
                     if (m.State == TorrentState.Seeding) { x.SeedSecs += 1; anySeeding = true; }
                     if (m.HasMetadata && (x.Files == null || x.TorrentFile == null)) GotMetadata(x, m);
+                    try { RescueTick(x, m, DateTime.Now); } catch { }   // 1.10: magnets stuck on "Getting info"
                     if (m.HasMetadata && m.Complete && x.CompletedAt == null && m.State != TorrentState.Hashing && m.State != TorrentState.HashingPaused)
                     {
                         // v1.5: a full recheck of what's on disk before it counts as finished (MonoTorrent 3.0.2 can report a torrent with

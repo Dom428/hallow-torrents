@@ -174,6 +174,7 @@ namespace HallowTorrents
             var n = Section(page, "Network", "Changes here restart the engine (only while the VPN is on).");
             n.Children.Add(Dialogs.Labeled("Listening port", NumField(S.Port, x => { S.Port = x; SavedRestart(); }, 1024, 65535)));
             n.Children.Add(Ui.Switch("DHT (find peers without a tracker) - bound to the VPN", S.Dht, on => { S.Dht = on; SavedRestart(); }));
+            n.Children.Add(Ui.Switch("Add public trackers to magnet links that find no one (after 75 seconds of Getting info) - bound to the VPN", S.AddPublicTrackers, on => { S.AddPublicTrackers = on; Saved(); }));
             n.Children.Add(Ui.Switch("Peer exchange (PEX)", S.Pex, on => { S.Pex = on; SavedRestart(); }));
             n.Children.Add(Ui.Switch("Local peer discovery (talks to your home network only, outside the VPN - off unless you need it)", S.Lpd, on => { S.Lpd = on; SavedRestart(); }));
             n.Children.Add(Ui.T("Encryption", 12.5, true));

@@ -39,6 +39,15 @@ Download `Hallow.Torrents.zip` from the [latest release](https://github.com/Dom4
 
 ![Settings](docs/settings.png)
 
+## Magnets stuck on "Getting info" (new in 1.10)
+
+A magnet link has no file list until a peer sends it, and it finds peers only through its own trackers and DHT. When one sits on
+**Getting info** for 75 seconds without finding anyone, Hallow Torrents adds a short list of well-known public trackers to it
+(after its own, like qBittorrent's "Automatically add these trackers") and asks the trackers and DHT again - once; while it's
+still stuck it asks DHT again every 2 minutes. Every tracker still goes out from the VPN address only. **Settings > "Add public
+trackers to magnet links that find no one"** (on) turns it off. The pipe's `details <hash>` explains a stuck torrent: its state,
+how long it has been getting info, peers found and connected, each tracker's status and message, DHT's state and node count.
+
 ## VPN on demand (new in 1.9)
 
 All of this happens **before** the VPN requirement, never instead of it: torrents still never run without a VPN, every socket is still bound to it, and the watchdog and leak drill are unchanged.
